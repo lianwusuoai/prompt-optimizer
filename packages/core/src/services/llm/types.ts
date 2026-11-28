@@ -131,6 +131,15 @@ export interface ImageUnderstandingImageInput {
   mimeType?: string;
 }
 
+export type VideoUnderstandingSource =
+  | { kind: 'url'; url: string }
+  | { kind: 'inline'; mimeType: string; data: string }
+
+export interface VideoUnderstandingRequest {
+  prompt: string
+  video: VideoUnderstandingSource
+}
+
 export interface ImageUnderstandingRequest {
   systemPrompt?: string;
   userPrompt: string;
@@ -232,6 +241,8 @@ export interface ILLMService {
    */
   sendMessageStructured(messages: Message[], provider: string): Promise<LLMResponse>;
 
+  sendVideoUnderstanding(request: VideoUnderstandingRequest, modelKey: string): Promise<LLMResponse>;
+
   /**
    * 发送流式消息（支持结构化和传统格式）
    * @throws {RequestConfigError} 当参数无效时
@@ -312,6 +323,8 @@ export interface ITextProviderAdapter {
    * @throws SDK原始错误（保留完整堆栈）
    */
   sendMessage(messages: Message[], config: TextModelConfig): Promise<LLMResponse>
+
+  sendVideoUnderstanding(request: VideoUnderstandingRequest, config: TextModelConfig): Promise<LLMResponse>
 
   /**
    * 发送流式消息

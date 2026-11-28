@@ -160,6 +160,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return result.data;
     },
 
+    sendVideoUnderstanding: async (request, modelKey) => {
+      const result = await ipcRenderer.invoke('llm-sendVideoUnderstanding', request, modelKey);
+      if (!result.success) throw createIpcError(result.error);
+      return result.data;
+    },
+
     // Fetch model list
     fetchModelList: async (provider, customConfig) => {
       const result = await ipcRenderer.invoke('llm-fetchModelList', provider, customConfig);

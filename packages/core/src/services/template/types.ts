@@ -29,6 +29,7 @@ export interface TemplateMetadata {
     | 'variable-extraction'
     | 'variable-value-generation'
     | 'image-prompt-composition'
+    | 'video-prompt-composition'
     | 'image-prompt-migration'; // 模板类型标识
   language?: 'zh' | 'en';   // 模板语言（可选，主要用于内置模板语言切换）
   [key: string]: any;       // 允许任意额外字段
@@ -161,6 +162,7 @@ export const templateSchema = z.object({
       'variable-extraction',
       'variable-value-generation',
       'image-prompt-composition',
+      'video-prompt-composition',
       'image-prompt-migration',
     ]),
     language: z.enum(['zh', 'en']).optional()

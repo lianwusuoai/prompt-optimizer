@@ -134,6 +134,7 @@ interface LlmAPI {
   testConnection(provider: string): Promise<void>
   sendMessage(messages: unknown[], provider: string): Promise<string>
   sendMessageStructured(messages: unknown[], provider: string): Promise<unknown>
+  sendVideoUnderstanding: import('@prompt-optimizer/core').ILLMService['sendVideoUnderstanding']
   sendMessageStream(messages: unknown[], provider: string, callbacks: LlmStreamCallbacks): Promise<void>
   sendMessageStreamWithTools(messages: unknown[], provider: string, tools: unknown[], callbacks: LlmStreamCallbacks): Promise<void>
   fetchModelList(provider: string, customConfig?: unknown): Promise<Array<{ value: string; label: string }>>

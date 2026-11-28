@@ -1,4 +1,5 @@
 import type { RuntimeModelSelection } from '../model/runtime-selection';
+import type { VideoUnderstandingRequest } from './types';
 import { runIpcStream } from '../../utils/ipc-stream';
 import { ILLMService, Message, StreamHandlers, LLMResponse, ModelOption, ToolDefinition } from './types';
 import { safeSerializeForIPC } from '../../utils/ipc-serialization';
@@ -21,6 +22,10 @@ export class ElectronLLMProxy implements ILLMService {
 
   async testConnection(provider: string): Promise<void> {
     await this.electronAPI.llm.testConnection(provider);
+  }
+
+  async sendVideoUnderstanding(request: VideoUnderstandingRequest, modelKey: string): Promise<LLMResponse> {
+    return this.electronAPI.llm.sendVideoUnderstanding(request, modelKey);
   }
 
   async sendMessage(messages: Message[], provider: string): Promise<string> {

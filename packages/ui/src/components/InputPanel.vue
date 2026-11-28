@@ -70,6 +70,8 @@
                         </NIcon>
                     </template>
                 </NButton>
+                <!-- 标题栏前置动作插槽（位于全屏/折叠图标左侧） -->
+                <slot name="header-actions"></slot>
                 <!-- 全屏按钮 -->
                 <NButton
                     type="tertiary"

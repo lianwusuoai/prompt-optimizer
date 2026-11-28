@@ -4,6 +4,7 @@ import type {
   Message,
   StreamHandlers,
   LLMResponse,
+  VideoUnderstandingRequest,
   ModelOption,
   ToolDefinition,
   TextModel,
@@ -279,6 +280,14 @@ export class LLMService implements ILLMService {
       }
       throw new APIError(`Failed to fetch model list: ${error.message}`);
     }
+  }
+
+  async sendVideoUnderstanding(request: VideoUnderstandingRequest, modelKey: string): Promise<LLMResponse> {
+    const modelConfig = await this.modelManager.getModel(modelKey)
+    if (!modelConfig) throw new RequestConfigError(`Model ${modelKey} not found`)
+    this.validateModelConfig(modelConfig)
+    const adapter = this.registry.getAdapter(modelConfig.providerMeta.id)
+    return adapter.sendVideoUnderstanding(request, this.prepareRuntimeConfig(modelConfig))
   }
 
   private prepareRuntimeConfig(modelConfig: TextModelConfig): TextModelConfig {

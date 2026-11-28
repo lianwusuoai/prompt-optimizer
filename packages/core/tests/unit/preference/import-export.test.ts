@@ -62,10 +62,12 @@ describe('PreferenceService Import/Export', () => {
     it('restores function model settings from exported backups, including automatic evaluation selection', async () => {
       await preferenceService.set(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, 'custom-evaluation');
       await preferenceService.set(FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL, 'vision-model');
+      await preferenceService.set(FUNCTION_MODEL_KEYS.VIDEO_UNDERSTANDING_MODEL, 'video-model');
       const destination = new PreferenceService(new MemoryStorageProvider());
       await destination.importData(await preferenceService.exportData());
       expect(await destination.get(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, '')).toBe('custom-evaluation');
       expect(await destination.get(FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL, '')).toBe('vision-model');
+      expect(await destination.get(FUNCTION_MODEL_KEYS.VIDEO_UNDERSTANDING_MODEL, '')).toBe('video-model');
 
       await preferenceService.set(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, '');
       await destination.importData(await preferenceService.exportData());

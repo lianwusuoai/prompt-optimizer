@@ -7,6 +7,7 @@ import type {
   TextModelConfig,
   Message,
   ImageUnderstandingRequest,
+  VideoUnderstandingRequest,
   LLMResponse,
   LLMTokenUsage,
   StreamHandlers,
@@ -568,6 +569,19 @@ export class GeminiAdapter extends AbstractTextProviderAdapter {
       console.error('[GeminiAdapter] API call failed:', error)
       throw error // 保留原始错误堆栈
     }
+  }
+
+  async sendVideoUnderstanding({ prompt, video }: VideoUnderstandingRequest, config: TextModelConfig): Promise<LLMResponse> {
+    const part = video.kind === 'url'
+      ? { fileData: { fileUri: video.url } }
+      : { inlineData: { mimeType: video.mimeType, data: video.data } }
+    const generationConfig = this.buildGenerationConfig(config.modelMeta.id, config.paramOverrides ?? {})
+    const response = await this.createClient(config).models.generateContent({
+      model: config.modelMeta.id,
+      contents: [{ role: 'user', parts: [part, { text: prompt }] }],
+      config: { ...generationConfig, httpOptions: { ...generationConfig.httpOptions, retryOptions: { attempts: 1 } } }
+    })
+    return this.extractResponsePayload(response, config.modelMeta.id)
   }
 
   protected async doSendImageUnderstanding(

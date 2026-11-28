@@ -7,6 +7,7 @@ import {
   type TextModelConfig,
 } from '@prompt-optimizer/core'
 import { VARIABLE_VALIDATION, isValidVariableName } from '../types/variable'
+import { isRecord, parseModelJsonObject } from '../utils/model-response-json'
 
 export type ImagePromptExtractionMode = 'text2image' | 'image2image'
 export type ReferenceApplicationMode = 'replicate' | 'migrate'
@@ -126,7 +127,7 @@ async function buildReferencePromptPrompts(
 }
 
 function normalizeReferencePromptPreview(rawText: string): ReferencePromptPreview {
-  const parsed = parseJsonObject(rawText)
+  const parsed = parseModelJsonObject(rawText)
   const variableDefaults = normalizeVariableDefaults(
     isRecord(parsed.defaults)
       ? parsed.defaults
@@ -324,31 +325,6 @@ function buildFilteredDefaults(
   }, {})
 }
 
-function parseJsonObject(rawText: string): Record<string, unknown> {
-  const trimmed = rawText.trim()
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
-  const candidate = fencedMatch?.[1]?.trim() || trimmed
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  const jsonText =
-    start >= 0 && end >= start
-      ? candidate.slice(start, end + 1)
-      : candidate
-
-  try {
-    const parsed = JSON.parse(jsonText)
-    if (!isRecord(parsed)) {
-      throw new Error('Model response is not a valid JSON object')
-    }
-    return parsed
-  } catch (error) {
-    if (error instanceof Error && error.message === 'Model response is not a valid JSON object') {
-      throw error
-    }
-    throw new Error('Model response is not valid JSON', { cause: error })
-  }
-}
-
 function createReferencePromptTemplateContext(
   context: {
     originalPrompt: string
@@ -424,8 +400,4 @@ function scanVariablesFromValue(value: unknown): string[] {
 
   visit(value)
   return found
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

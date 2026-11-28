@@ -9,6 +9,7 @@ import type {
   TextModelConfig,
   Message,
   ImageUnderstandingRequest,
+  VideoUnderstandingRequest,
   LLMResponse,
   StreamHandlers,
   ParameterDefinition,
@@ -373,12 +374,33 @@ export class AnthropicAdapter extends AbstractTextProviderAdapter {
     request: ImageUnderstandingRequest,
     config: TextModelConfig
   ): Promise<LLMResponse> {
+    const content = [
+      { type: 'text', text: request.userPrompt },
+      ...request.images.map(image => ({
+        type: 'image',
+        source: { type: 'base64', media_type: image.mimeType || 'image/png', data: image.b64 }
+      }))
+    ]
+    return this.sendMediaMessage(content, config, request.systemPrompt, request.paramOverrides)
+  }
+
+  async sendVideoUnderstanding({ prompt, video }: VideoUnderstandingRequest, config: TextModelConfig): Promise<LLMResponse> {
+    const source = video.kind === 'url'
+      ? { type: 'url', url: video.url }
+      : { type: 'base64', media_type: video.mimeType, data: video.data }
+    return this.sendMediaMessage([{ type: 'document', source }, { type: 'text', text: prompt }], config, undefined, undefined, { maxRetries: 0 })
+  }
+
+  private async sendMediaMessage(
+    content: unknown[], config: TextModelConfig, systemPrompt?: string,
+    paramOverrides?: Record<string, unknown>, options?: { maxRetries: number }
+  ): Promise<LLMResponse> {
     const client = this.createClient(config)
 
     try {
       const mergedParams = {
         ...(config.paramOverrides || {}),
-        ...(request.paramOverrides || {})
+        ...(paramOverrides || {})
       } as Record<string, unknown>
 
       const {
@@ -394,25 +416,7 @@ export class AnthropicAdapter extends AbstractTextProviderAdapter {
 
       const requestParams: any = {
         model: config.modelMeta.id,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: request.userPrompt
-              },
-              ...request.images.map((image) => ({
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: image.mimeType || 'image/png',
-                  data: image.b64
-                }
-              }))
-            ]
-          }
-        ],
+        messages: [{ role: 'user', content }],
         max_tokens: max_tokens ?? DEFAULT_MAX_TOKENS
       }
 
@@ -425,13 +429,13 @@ export class AnthropicAdapter extends AbstractTextProviderAdapter {
       if (!this.isAdaptiveThinkingModel(config.modelMeta.id) && top_k !== undefined) {
         requestParams.top_k = top_k
       }
-      if (request.systemPrompt?.trim()) {
-        requestParams.system = request.systemPrompt
+      if (systemPrompt?.trim()) {
+        requestParams.system = systemPrompt
       }
       Object.assign(requestParams, otherParams)
       this.applyThinkingConfig(requestParams, config.modelMeta.id, thinking_budget_tokens, effort)
 
-      const response = await client.messages.create(requestParams)
+      const response = await client.messages.create(requestParams, options)
       const reasoning = this.extractThinking(response)
 
       return {

@@ -976,6 +976,15 @@ function setupIPC() {
     }
   }));
 
+  ipcMain.handle('llm-sendVideoUnderstanding', withModelNetwork(async (_event, request, modelKey) => {
+    try {
+      return createSuccessResponse(await llmService.sendVideoUnderstanding(request, modelKey));
+    } catch (error) {
+      // A provider may include submitted media in the SDK error object.
+      return { success: false, error: normalizeIpcError(error) };
+    }
+  }));
+
   ipcMain.handle('local-services-discover', async (_event, ports) => {
     try {
       return createSuccessResponse(await discoverDesktopLocalServices(ports));

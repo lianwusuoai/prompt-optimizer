@@ -9,6 +9,7 @@ export type TemplateManagerTemplateType = Exclude<
   | 'variable-value-generation'
   | 'image-reference-prompt-seed-extraction'
   | 'image-prompt-composition'
+  | 'video-prompt-composition'
   | 'image-prompt-migration'
 >
 

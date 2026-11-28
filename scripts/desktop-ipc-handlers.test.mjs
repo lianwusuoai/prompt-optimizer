@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
+import { EventEmitter } from 'node:events'
 
 const readText = (relativePath) =>
   fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8')
@@ -72,6 +73,35 @@ test('desktop Arena streams forward request-local selection and preserve cancell
   assert.equal((await invoke({ sender: {} }, [], 'saved-connection', 'run-id', selection)).success, true)
   assert.equal(released, true)
   assert.match(readText('packages/desktop/preload.js'), /ipcRenderer\.invoke\('llm-sendMessageStream', messages, provider, streamId, selection\)/)
+})
+
+test('desktop video understanding forwards the source and chosen model and returns provider errors', async () => {
+  const main = readText('packages/desktop/main.js')
+  const start = main.indexOf("ipcMain.handle('llm-sendVideoUnderstanding'")
+  const source = main.slice(start, main.indexOf('\n  }));', start) + '\n  }));'.length)
+  const handlers = new Map()
+  const calls = []
+  vm.runInNewContext(source, {
+    ipcMain: { handle: (key, handler) => handlers.set(key, handler) },
+    withModelNetwork: handler => handler,
+    llmService: { sendVideoUnderstanding: async (...args) => {
+      calls.push(args)
+      if (calls.length === 2) throw new Error('Provider rejected the video')
+      return { content: 'generated prompt' }
+    } },
+    createSuccessResponse: data => ({ success: true, data }),
+    normalizeIpcError: error => ({ message: error.message }),
+  })
+  let api
+  const contextBridge = { exposeInMainWorld: (_key, value) => { api = value } }
+  const ipcRenderer = new EventEmitter()
+  ipcRenderer.invoke = (key, ...args) => handlers.get(key)(null, ...args)
+  vm.runInNewContext(readText('packages/desktop/preload.js'), { require: () => ({ contextBridge, ipcRenderer }), process })
+
+  const request = { prompt: 'Recreate the clip.', video: { kind: 'inline', mimeType: 'video/webm', data: 'GkXfow==' } }
+  assert.equal((await api.llm.sendVideoUnderstanding(request, 'chosen-model')).content, 'generated prompt')
+  await assert.rejects(api.llm.sendVideoUnderstanding(request, 'chosen-model'), /Provider rejected the video/)
+  assert.deepEqual(calls, [[request, 'chosen-model'], [request, 'chosen-model']])
 })
 
 test('desktop backup restore acknowledges success only after the final disk flush', async () => {

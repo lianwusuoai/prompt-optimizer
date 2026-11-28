@@ -166,6 +166,8 @@ import { imagePromptCompositionTemplate } from './image-prompt-composition';
 import { imagePromptCompositionTemplateEn } from './image-prompt-composition';
 import { imagePromptMigrationTemplate } from './image-prompt-migration';
 import { imagePromptMigrationTemplateEn } from './image-prompt-migration';
+import { template as videoPromptCompositionTemplate } from './video-prompt-composition/composition';
+import { template as videoPromptCompositionTemplateEn } from './video-prompt-composition/composition_en';
 
 // 简单的模板集合 - 模板自身已包含完整信息（id、name、language、type等）
 export const ALL_TEMPLATES = {
@@ -318,4 +320,6 @@ export const ALL_TEMPLATES = {
   imagePromptCompositionTemplateEn,
   imagePromptMigrationTemplate,
   imagePromptMigrationTemplateEn,
+  videoPromptCompositionTemplate,
+  videoPromptCompositionTemplateEn,
 };

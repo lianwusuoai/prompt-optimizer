@@ -56,6 +56,7 @@ export const FUNCTION_MODEL_KEYS = {
   EVALUATION_MODEL: "app:function-model:evaluation-model",
   // 全局图片识别模型
   IMAGE_RECOGNITION_MODEL: "app:function-model:image-recognition-model",
+  VIDEO_UNDERSTANDING_MODEL: "app:function-model:video-understanding-model",
 } as const;
 
 /**

@@ -25,6 +25,7 @@ export type TemplateType =
   | 'context-iterate'
   | 'evaluation'
   | 'image-prompt-composition'
+  | 'video-prompt-composition'
   | 'image-prompt-migration';
 export type Language = 'zh' | 'en';
 
@@ -89,6 +90,7 @@ export class StaticLoader {
         'context-iterate': { zh: {}, en: {} },
         'evaluation': { zh: {}, en: {} },
         'image-prompt-composition': { zh: {}, en: {} },
+        'video-prompt-composition': { zh: {}, en: {} },
         'image-prompt-migration': { zh: {}, en: {} }
       };
 
@@ -142,7 +144,8 @@ export class StaticLoader {
             normalizedType = 'evaluation';
             break;
           case 'image-prompt-composition':
-            normalizedType = 'image-prompt-composition';
+          case 'video-prompt-composition':
+            normalizedType = templateType;
             break;
           case 'image-prompt-migration':
             normalizedType = 'image-prompt-migration';
@@ -185,6 +188,7 @@ export class StaticLoader {
         'context-iterate': Object.keys(byType['context-iterate'].zh).length + Object.keys(byType['context-iterate'].en).length,
         evaluation: Object.keys(byType.evaluation.zh).length + Object.keys(byType.evaluation.en).length,
         'image-prompt-composition': Object.keys(byType['image-prompt-composition'].zh).length + Object.keys(byType['image-prompt-composition'].en).length,
+        'video-prompt-composition': Object.keys(byType['video-prompt-composition'].zh).length + Object.keys(byType['video-prompt-composition'].en).length,
         'image-prompt-migration': Object.keys(byType['image-prompt-migration'].zh).length + Object.keys(byType['image-prompt-migration'].en).length
       });
 

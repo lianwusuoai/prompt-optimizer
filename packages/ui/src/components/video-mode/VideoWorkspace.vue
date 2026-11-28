@@ -27,6 +27,9 @@
                   :selected-model="selectedTextModelKey" :model-label="t('promptOptimizer.optimizeModel')" :template-label="t('imageWorkspace.input.optimizeTemplate')"
                   :button-text="t('imageWorkspace.input.optimizePrompt')" :compact-button-text="t('common.optimize')" :loading-text="t('common.loading')" :loading="session.optimizing"
                   :disabled="!selectedTextModelKey || !selectedTemplateId || !templateOptions.length || !!uploading || session.iterating" @submit="writePrompt()">
+                  <template #header-actions>
+                    <VideoReverseAction :disabled="workspaceBusy" :compact="isCompact" />
+                  </template>
                   <template #header-extra>
                     <NButton type="tertiary" size="small" ghost round :aria-label="t('common.collapse')" @click="inputCollapsed = true">
                       <template #icon><ChevronUp /></template>
@@ -148,6 +151,7 @@ import OptimizeWorkspaceLayout from '../common/OptimizeWorkspaceLayout.vue'
 import TestSourcePreview from '../common/TestSourcePreview.vue'
 import TextModelSelector from '../TextModelSelector.vue'
 import VideoTestPanel from './VideoTestPanel.vue'
+import VideoReverseAction from './VideoReverseAction.vue'
 import ReferenceImagePicker, { type ReferenceImageItem } from '../media/ReferenceImagePicker.vue'
 const session = useVideoCreateSession()
 const state = computed(() => session.state)

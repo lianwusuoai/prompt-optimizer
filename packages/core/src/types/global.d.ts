@@ -16,6 +16,7 @@ interface Window {
       // Define the methods for the LLM API proxy
       sendMessage: (messages: any[], provider: string) => Promise<string>;
       sendMessageStructured: (messages: any[], provider: string) => Promise<any>;
+      sendVideoUnderstanding: import('../services/llm/types').ILLMService['sendVideoUnderstanding'];
       sendMessageStream: (
         messages: any[],
         provider: string,

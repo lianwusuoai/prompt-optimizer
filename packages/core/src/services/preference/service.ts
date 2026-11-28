@@ -56,8 +56,7 @@ const assertValidPreferenceKey: (
 
 // 需要导出的UI配置键 - 白名单验证
 const UI_SETTINGS_KEYS = [
-  FUNCTION_MODEL_KEYS.EVALUATION_MODEL,
-  FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL,
+  ...Object.values(FUNCTION_MODEL_KEYS),
   "app:settings:ui:theme-id",
   "app:settings:ui:preferred-language",
   "app:settings:ui:builtin-template-language",

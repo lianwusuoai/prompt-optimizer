@@ -1,10 +1,10 @@
 <template>
   <div class="function-model-manager" :class="{ 'function-model-manager--compact': isCompact }">
     <NSpace vertical :size="12">
-      <NCard embedded size="small" :bordered="false" class="function-config-card">
+      <NCard v-for="role in roles" :key="role.key" embedded size="small" :bordered="false" class="function-config-card">
         <template #header>
           <NSpace justify="space-between" align="center" :size="8" class="section-header">
-            <NText strong>{{ t('functionModel.evaluationModel') }}</NText>
+            <NText strong>{{ t('functionModel.' + role.key) }}</NText>
             <NTag v-if="!isCompact" size="small" type="default" round :bordered="false">
               {{ t('modelManager.textModels') }}
             </NTag>
@@ -13,65 +13,35 @@
 
         <NSpace vertical :size="12" class="config-section">
           <NText depth="3" class="section-hint">
-            {{ t('functionModel.evaluationModelHint') }}
+            {{ t('functionModel.' + role.key + 'Hint') }}
           </NText>
-          <NText v-if="!isEvaluationModelAvailable" type="warning" class="section-hint">
-            {{ t('functionModel.evaluationModelUnavailable') }}
+          <NText v-if="!role.available" type="warning" class="section-hint">
+            {{ t('functionModel.' + role.key + 'Unavailable') }}
           </NText>
 
           <div class="model-select-row">
             <TextModelSelector
-              :model-value="evaluationModel || ''"
-              :options="evaluationModelOptions"
-              :placeholder="t('functionModel.evaluationModelPlaceholder')"
+              :data-testid="'function-' + role.key"
+              :model-value="role.model"
+              :options="modelOptions"
+              :placeholder="role.key === 'evaluationModel' ? t('functionModel.evaluationModelPlaceholder') : t('model.select.placeholder')"
               size="medium"
-              clearable
+              :clearable="role.key === 'evaluationModel'"
               :clear-label="t('model.selector.followDefault')"
               @focus="refreshModels"
               @config="handleOpenModelManager"
-              @update:model-value="handleEvaluationModelChange"
+              @update:model-value="value => saveSelection(role.save, value)"
             />
           </div>
         </NSpace>
       </NCard>
 
-      <NCard embedded size="small" :bordered="false" class="function-config-card">
-        <template #header>
-          <NSpace justify="space-between" align="center" :size="8" class="section-header">
-            <NText strong>{{ t('functionModel.imageRecognitionModel') }}</NText>
-            <NTag v-if="!isCompact" size="small" type="default" round :bordered="false">
-              {{ t('modelManager.textModels') }}
-            </NTag>
-          </NSpace>
-        </template>
-
-        <NSpace vertical :size="12" class="config-section">
-          <NText depth="3" class="section-hint">
-            {{ t('functionModel.imageRecognitionModelHint') }}
-          </NText>
-          <NText v-if="!isImageRecognitionModelAvailable" type="warning" class="section-hint">
-            {{ t('functionModel.imageRecognitionModelUnavailable') }}
-          </NText>
-
-          <div class="model-select-row">
-            <TextModelSelector
-              :model-value="imageRecognitionModel || ''"
-              :options="imageRecognitionModelOptions"
-              :placeholder="t('model.select.placeholder')"
-              size="medium"
-              @focus="refreshModels"
-              @config="handleOpenModelManager"
-              @update:model-value="handleImageRecognitionModelChange"
-            />
-          </div>
-        </NSpace>
-      </NCard>
     </NSpace>
   </div>
 </template>
 
 <script setup lang="ts">
-import { inject, onMounted, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, ref, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NCard, NSpace, NTag, NText } from 'naive-ui'
 import TextModelSelector from './TextModelSelector.vue'
@@ -106,18 +76,17 @@ const servicesRef: Ref<AppServices | null> = 'value' in services
 
 // 使用功能模型管理器（单例）
 const functionModelManager = useFunctionModelManager(servicesRef)
-const {
-  evaluationModel,
-  isEvaluationModelAvailable,
-  imageRecognitionModel,
-  isImageRecognitionModelAvailable,
-  setEvaluationModel,
-  setImageRecognitionModel,
-} = functionModelManager
+const roles = computed(() => [
+  { key: 'evaluationModel', model: functionModelManager.evaluationModel.value,
+    available: functionModelManager.isEvaluationModelAvailable.value, save: functionModelManager.setEvaluationModel },
+  { key: 'imageRecognitionModel', model: functionModelManager.imageRecognitionModel.value,
+    available: functionModelManager.isImageRecognitionModelAvailable.value, save: functionModelManager.setImageRecognitionModel },
+  { key: 'videoUnderstandingModel', model: functionModelManager.videoUnderstandingModel.value,
+    available: functionModelManager.isVideoUnderstandingModelAvailable.value, save: functionModelManager.setVideoUnderstandingModel },
+])
 
 // 模型选项列表
-const evaluationModelOptions = ref<ModelSelectOption[]>([])
-const imageRecognitionModelOptions = ref<ModelSelectOption[]>([])
+const modelOptions = ref<ModelSelectOption[]>([])
 
 const ensureInitializedIfSupported = async (manager: unknown) => {
   if (!manager || typeof manager !== 'object') return
@@ -132,8 +101,7 @@ let modelListRefreshToken = 0
 const refreshModels = async () => {
   const token = ++modelListRefreshToken
   if (!servicesRef.value?.modelManager) {
-    evaluationModelOptions.value = []
-    imageRecognitionModelOptions.value = []
+    modelOptions.value = []
     return
   }
 
@@ -145,8 +113,7 @@ const refreshModels = async () => {
 
     const getProviderName = (model: ModelSelectOption['raw']) => getProviderDisplayName(model.providerMeta, t)
     const getModelName = (model: ModelSelectOption['raw']) => getTextModelConfigDisplayName(model, t)
-    evaluationModelOptions.value = DataTransformer.modelsToSelectOptions(enabledModels, { getProviderName, getModelName })
-    imageRecognitionModelOptions.value = DataTransformer.modelsToSelectOptions(enabledModels, { getProviderName, getModelName })
+    modelOptions.value = DataTransformer.modelsToSelectOptions(enabledModels, { getProviderName, getModelName })
   } catch (error) {
     if (token !== modelListRefreshToken) return
     console.error('[FunctionModelManager] Failed to refresh models:', error)
@@ -166,21 +133,12 @@ const normalizeModelValue = (
         : String(newValue)
 }
 
-const handleEvaluationModelChange = async (
+const saveSelection = async (
+  save: (key: string) => Promise<void>,
   newValue: string | number | (string | number)[] | null
 ) => {
   try {
-    await setEvaluationModel(normalizeModelValue(newValue))
-  } catch (error) {
-    toast.error(formatErrorSummary(t('functionModel.saveFailed'), error))
-  }
-}
-
-const handleImageRecognitionModelChange = async (
-  newValue: string | number | (string | number)[] | null
-) => {
-  try {
-    await setImageRecognitionModel(normalizeModelValue(newValue))
+    await save(normalizeModelValue(newValue))
   } catch (error) {
     toast.error(formatErrorSummary(t('functionModel.saveFailed'), error))
   }

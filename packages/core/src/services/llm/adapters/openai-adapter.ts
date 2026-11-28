@@ -9,6 +9,7 @@ import type {
   TextModelConfig,
   Message,
   ImageUnderstandingRequest,
+  VideoUnderstandingRequest,
   LLMResponse,
   LLMTokenUsage,
   StreamHandlers,
@@ -1026,6 +1027,39 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
       console.error('[OpenAIAdapter] API call failed:', error)
       throw error // 保留原始错误堆栈，不包装
     }
+  }
+
+  protected buildResponsesVideoInput(request: VideoUnderstandingRequest) {
+    return [{
+      role: 'user',
+      content: [
+        { type: 'input_text', text: request.prompt },
+        { type: 'input_video', video_url: this.videoUrl(request.video) }
+      ]
+    }]
+  }
+
+  private videoUrl(video: VideoUnderstandingRequest['video']): string {
+    return video.kind === 'url' ? video.url : `data:${video.mimeType};base64,${video.data}`
+  }
+
+  async sendVideoUnderstanding(request: VideoUnderstandingRequest, config: TextModelConfig): Promise<LLMResponse> {
+    const client = this.createOpenAIInstance(config).withOptions({ maxRetries: 0 })
+    if (this.getRequestStyle(config) === 'responses') {
+      return this.sendResponsesMessage(client, [], config, this.buildResponsesVideoInput(request))
+    }
+    const { timeout: _timeout, model: _model, messages: _messages, stream: _stream,
+      responseMimeType: _responseMimeType, ...params } = config.paramOverrides ?? {}
+    // Compatible endpoints extend Chat Completions with video_url.
+    const content = [
+      { type: 'text' as const, text: request.prompt },
+      { type: 'video_url' as const, video_url: { url: this.videoUrl(request.video) } }
+    ]
+    const response = await client.chat.completions.create({
+      ...params, model: config.modelMeta.id,
+      messages: [{ role: 'user', content: content as OpenAI.ChatCompletionContentPart[] }]
+    })
+    return this.parseCompletionResponse(response, config.modelMeta.id)
   }
 
   protected async doSendImageUnderstanding(

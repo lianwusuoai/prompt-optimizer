@@ -28,6 +28,9 @@ export interface UseFunctionModelManagerReturn {
   isImageRecognitionModelAvailable: ComputedRef<boolean>
   /** 有效的图片识别模型（图片提取功能要求显式设置） */
   effectiveImageRecognitionModel: ComputedRef<string>
+  videoUnderstandingModel: Ref<string>
+  isVideoUnderstandingModelAvailable: ComputedRef<boolean>
+  effectiveVideoUnderstandingModel: ComputedRef<string>
   /** 是否正在加载 */
   isLoading: Ref<boolean>
   /** 是否已初始化 */
@@ -37,6 +40,7 @@ export interface UseFunctionModelManagerReturn {
   setEvaluationModel: (modelId: string) => Promise<void>
   /** 设置图片识别模型 */
   setImageRecognitionModel: (modelId: string) => Promise<void>
+  setVideoUnderstandingModel: (modelId: string) => Promise<void>
   /** 获取有效评估模型（兼容旧 API） */
   getEffectiveEvaluationModel: () => ComputedRef<string>
   /** 按评估配置、全局优化模型、调用方回退模型的顺序选择 */
@@ -87,6 +91,7 @@ export function useFunctionModelManager(
   const isInitialized = ref(false)
   const evaluationModel = ref('')
   const imageRecognitionModel = ref('')
+  const videoUnderstandingModel = ref('')
   const globalOptimizeModelFallback = ref('')
   const availableModelKeys = ref<string[]>([])
   let initPromise: Promise<void> | null = null
@@ -111,8 +116,13 @@ export function useFunctionModelManager(
   // 固定的 computed 使用可更新的全局模型引用
   const effectiveEvaluationModel = computed(() => resolveEvaluationModelKey())
 
-  const isImageRecognitionModelAvailable = computed(() =>
-    !imageRecognitionModel.value || availableModelKeys.value.includes(getTextModelSelectionConfigId(imageRecognitionModel.value))
+  const isSelectionAvailable = (selection: Ref<string>) => computed(() =>
+    !selection.value || availableModelKeys.value.includes(getTextModelSelectionConfigId(selection.value))
+  )
+  const isImageRecognitionModelAvailable = isSelectionAvailable(imageRecognitionModel)
+  const isVideoUnderstandingModelAvailable = isSelectionAvailable(videoUnderstandingModel)
+  const effectiveVideoUnderstandingModel = computed(() =>
+    isVideoUnderstandingModelAvailable.value ? videoUnderstandingModel.value : ''
   )
   const effectiveImageRecognitionModel = computed(() =>
     isImageRecognitionModelAvailable.value ? imageRecognitionModel.value : ''
@@ -153,17 +163,14 @@ export function useFunctionModelManager(
       try {
         await refreshAvailableModels()
 
-        // 读取评估模型
-        const savedEvaluationModel = await getPreference(
-          FUNCTION_MODEL_KEYS.EVALUATION_MODEL,
-          ''
-        )
-        const savedImageRecognitionModel = await getPreference(
-          FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL,
-          ''
-        )
+        const [savedEvaluationModel, savedImageRecognitionModel, savedVideoUnderstandingModel] = await Promise.all([
+          getPreference(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, ''),
+          getPreference(FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL, ''),
+          getPreference(FUNCTION_MODEL_KEYS.VIDEO_UNDERSTANDING_MODEL, ''),
+        ])
         evaluationModel.value = savedEvaluationModel
         imageRecognitionModel.value = savedImageRecognitionModel
+        videoUnderstandingModel.value = savedVideoUnderstandingModel
 
         isInitialized.value = true
       } finally {
@@ -195,18 +202,15 @@ export function useFunctionModelManager(
     await initialize()
   })
 
-  // 设置评估模型
-  const setEvaluationModel = (modelId: string): Promise<void> => enqueuePreferenceOperation(async () => {
-    await initialize()
-    await setPreference(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, modelId)
-    evaluationModel.value = modelId
-  })
-
-  const setImageRecognitionModel = (modelId: string): Promise<void> => enqueuePreferenceOperation(async () => {
-    await initialize()
-    await setPreference(FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL, modelId)
-    imageRecognitionModel.value = modelId
-  })
+  const saveSelection = (key: string, selection: Ref<string>) => (modelId: string) =>
+    enqueuePreferenceOperation(async () => {
+      await initialize()
+      await setPreference(key, modelId)
+      selection.value = modelId
+    })
+  const setEvaluationModel = saveSelection(FUNCTION_MODEL_KEYS.EVALUATION_MODEL, evaluationModel)
+  const setImageRecognitionModel = saveSelection(FUNCTION_MODEL_KEYS.IMAGE_RECOGNITION_MODEL, imageRecognitionModel)
+  const setVideoUnderstandingModel = saveSelection(FUNCTION_MODEL_KEYS.VIDEO_UNDERSTANDING_MODEL, videoUnderstandingModel)
 
   // 获取有效评估模型（返回同一个 computed 实例）
   const getEffectiveEvaluationModel = (): ComputedRef<string> => {
@@ -239,10 +243,14 @@ export function useFunctionModelManager(
     imageRecognitionModel,
     isImageRecognitionModelAvailable,
     effectiveImageRecognitionModel,
+    videoUnderstandingModel,
+    isVideoUnderstandingModelAvailable,
+    effectiveVideoUnderstandingModel,
     isLoading,
     isInitialized,
     setEvaluationModel,
     setImageRecognitionModel,
+    setVideoUnderstandingModel,
     getEffectiveEvaluationModel,
     resolveEvaluationModelKey,
     getEffectiveImageRecognitionModel,

@@ -5,6 +5,7 @@ import type {
   TextModelConfig,
   Message,
   ImageUnderstandingRequest,
+  VideoUnderstandingRequest,
   LLMResponse,
   StreamHandlers,
   ToolDefinition,
@@ -84,6 +85,10 @@ export abstract class AbstractTextProviderAdapter implements ITextProviderAdapte
     throw new RequestConfigError(
       `${this.getProvider().name} does not support image understanding requests`
     )
+  }
+
+  async sendVideoUnderstanding(_request: VideoUnderstandingRequest, _config: TextModelConfig): Promise<LLMResponse> {
+    throw new RequestConfigError(`${this.getProvider().name} does not support video input`)
   }
 
   /**

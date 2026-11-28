@@ -41,6 +41,8 @@ export { ElectronHistoryManagerProxy } from './services/history/electron-proxy'
 // 导出LLM服务相关
 export type {
   ILLMService,
+  VideoUnderstandingRequest,
+  VideoUnderstandingSource,
   Message,
   StreamHandlers,
   LLMResponse,
