@@ -33,7 +33,7 @@ describe('image text2image evaluation closure guard', () => {
     expect(source).toContain("kind: 'replicate' as ReferenceActionKind")
     expect(source).toContain("kind: 'style-learn' as ReferenceActionKind")
     expect(source).toContain('referenceAction.requestAction(actionKind)')
-    expect(source).toContain("extractImageInputRef.value?.click()")
+    expect(source).toContain('showReferenceDialog.value = true')
     expect(source).toContain('data-testid="image-text2image-analyze-button"')
     expect(source).toContain('@click="handleAnalyzePrompt"')
     expect(source).toContain("await handleEvaluateInternal('prompt-only')")

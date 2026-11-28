@@ -56,6 +56,9 @@ const messages = {
       "extractFailed": "图片提取失败"
     },
     "referenceImage": {
+      "pickHint": "点击、拖入或粘贴参考图",
+      "analyzing": "正在识别参考图…",
+      "generate": "生成提示词",
       "replicateAction": "复刻",
       "replicateActionDescription": "忽略当前提示词，以参考图为主反推提示词和变量",
       "styleLearnAction": "风格学习",

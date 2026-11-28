@@ -16,7 +16,7 @@ describe('image2image reference entry guards', () => {
     expect(image2imageSource).not.toMatch(/extractPromptFromReferenceImage/)
     expect(image2imageSource).not.toMatch(/resolveReferencePromptPreview/)
     expect(image2imageSource).not.toMatch(/extractImageInputRef/)
-    expect(text2imageSource).toMatch(/resolveReferencePromptPreview/)
+    expect(text2imageSource).toContain('<ImageReferenceDialog')
     expect(text2imageSource).toMatch(/referenceActionButtons/)
   })
 })

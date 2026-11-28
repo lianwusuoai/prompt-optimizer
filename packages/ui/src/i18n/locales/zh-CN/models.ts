@@ -256,6 +256,8 @@ const messages = {
     "confirmAddAriaLabel": "确认添加模型"
   },
   "functionModel": {
+    "currentModel": "当前模型：{model}",
+    "changeModel": "切换",
     "evaluationModel": "评估模型",
     "evaluationModelPlaceholder": "默认：跟随全局优化模型",
     "evaluationModelUnavailable": "已设置的评估模型已停用或删除，将按默认顺序选择可用模型。",

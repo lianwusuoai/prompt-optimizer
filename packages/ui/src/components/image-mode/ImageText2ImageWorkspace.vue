@@ -53,39 +53,18 @@
                             @open-import="showPromptGardenImport = true"
                         />
                         <NFlex align="center" :size="6" class="reference-action-toolbar">
-                            <NTooltip
+                            <ReferenceActionButton
                                 v-for="button in referenceActionButtons"
                                 :key="button.kind"
-                                trigger="hover"
-                                :overlay-style="referenceActionTooltipOverlayStyle"
-                                :content-style="referenceActionTooltipContentStyle"
-                                :theme-overrides="referenceActionTooltipThemeOverrides"
-                                to="body"
-                                :flip="true"
+                                :label="t(button.labelKey)"
+                                :description="t(button.tooltipKey)"
+                                :data-testid="`reference-action-${button.kind}-button`"
+                                :loading="button.loading"
+                                :disabled="button.disabled || checkingReferenceModel"
+                                @click="triggerReferenceAction(button.kind)"
                             >
-                                <template #trigger>
-                                    <span class="reference-action-button-wrap">
-                                        <NButton
-                                            type="tertiary"
-                                            size="small"
-                                            ghost
-                                            class="header-utility-button"
-                                            :data-testid="`reference-action-${button.kind}-button`"
-                                            :loading="button.loading"
-                                            :disabled="button.disabled"
-                                            @click="triggerReferenceAction(button.kind)"
-                                        >
-                                            <template #icon>
-                                                <NIcon :size="16">
-                                                    <UiCamera />
-                                                </NIcon>
-                                            </template>
-                                            {{ t(button.labelKey) }}
-                                        </NButton>
-                                    </span>
-                                </template>
-                                {{ t(button.tooltipKey) }}
-                            </NTooltip>
+                                <template #icon><UiCamera /></template>
+                            </ReferenceActionButton>
 
                             <div
                                 v-if="referenceAction.hasSourceImage || referenceAction.status !== 'idle'"
@@ -152,39 +131,18 @@
                                 @open-import="showPromptGardenImport = true"
                             />
                             <NFlex align="center" :size="6" class="reference-action-toolbar">
-                                <NTooltip
+                                <ReferenceActionButton
                                     v-for="button in referenceActionButtons"
                                     :key="button.kind"
-                                    trigger="hover"
-                                    :overlay-style="referenceActionTooltipOverlayStyle"
-                                    :content-style="referenceActionTooltipContentStyle"
-                                    :theme-overrides="referenceActionTooltipThemeOverrides"
-                                    to="body"
-                                    :flip="true"
+                                    :label="t(button.labelKey)"
+                                    :description="t(button.tooltipKey)"
+                                    :data-testid="`reference-action-${button.kind}-button`"
+                                    :loading="button.loading"
+                                    :disabled="button.disabled || checkingReferenceModel"
+                                    @click="triggerReferenceAction(button.kind)"
                                 >
-                                    <template #trigger>
-                                        <span class="reference-action-button-wrap">
-                                            <NButton
-                                                type="tertiary"
-                                                size="small"
-                                                ghost
-                                                class="header-utility-button"
-                                                :data-testid="`reference-action-${button.kind}-button`"
-                                                :loading="button.loading"
-                                                :disabled="button.disabled"
-                                                @click="triggerReferenceAction(button.kind)"
-                                            >
-                                                <template #icon>
-                                                    <NIcon :size="16">
-                                                        <UiCamera />
-                                                    </NIcon>
-                                                </template>
-                                                {{ t(button.labelKey) }}
-                                            </NButton>
-                                        </span>
-                                    </template>
-                                    {{ t(button.tooltipKey) }}
-                                </NTooltip>
+                                    <template #icon><UiCamera /></template>
+                                </ReferenceActionButton>
 
                                 <div
                                     v-if="referenceAction.hasSourceImage || referenceAction.status !== 'idle'"
@@ -393,13 +351,6 @@
                 </NSpace></div>
             </TestSourceLinkedCard>
 
-            <input
-                ref="extractImageInputRef"
-                type="file"
-                accept="image/png,image/jpeg"
-                style="display: none"
-                @change="handleReferenceImageFileChange"
-            />
 
             <!-- 优化结果区域 - 使用与基础模式一致的卡片容器 -->
             </template>
@@ -787,6 +738,16 @@
             :renderPhase="previewRenderPhase"
         />
 
+        <ImageReferenceDialog
+            v-if="showReferenceDialog"
+            :kind="referenceAction.actionKind"
+            :original-prompt="referenceAction.currentPromptSnapshot"
+            @busy="isExtractingFromImage = $event"
+            @configure="openFunctionModelManager"
+            @close="closeReferenceDialog"
+            @apply="applyReferenceResult"
+        />
+
         <PromptGardenImportDialog
             v-model:show="showPromptGardenImport"
             @confirm="handlePromptGardenImportConfirm"
@@ -828,7 +789,6 @@ import {
     NFlex,
     NIcon,
     NTag,
-    NTooltip,
 } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import PromptPanelUI from "../PromptPanel.vue";
@@ -845,7 +805,8 @@ import { useLocalPromptPreviewPanel } from '../../composables/prompt/useLocalPro
 import { OptionAccessors } from "../../utils/data-transformer";
 import type { AppServices } from "../../types/services";
 import { useFullscreen } from "../../composables/ui/useFullscreen";
-import { useTooltipTheme } from '../../composables/ui/useTooltipTheme'
+import ReferenceActionButton from '../media/ReferenceActionButton.vue'
+import ImageReferenceDialog from './ImageReferenceDialog.vue'
 import FullscreenDialog from "../FullscreenDialog.vue";
 import type { SelectOption } from "../../types/select-options";
 import { useToast } from "../../composables/ui/useToast";
@@ -855,10 +816,7 @@ import { resolveSourceAssetRef } from '../../utils/source-asset'
 import { downloadImageSource } from '../../utils/image-download'
 import { createImagePromptAnalysisVersion } from '../../utils/imagePromptAnalysis'
 import type { PromptGardenImportRequest } from '../../utils/prompt-garden-import'
-import {
-    resolveReferencePromptPreview,
-    type ReferenceApplicationMode,
-} from '../../services/ImageStyleExtractor'
+import type { ReferencePromptPreview } from '../../services/ImageStyleExtractor'
 import { VariableAwareInput } from '../variable-extraction'
 import TemporaryVariablesPanel from '../variable/TemporaryVariablesPanel.vue'
 import VariableValuePreviewDialog from '../variable/VariableValuePreviewDialog.vue'
@@ -891,7 +849,6 @@ import {
     type TestVariantId,
 } from '../../stores/session/useImageText2ImageSession'
 import { useImageGeneration } from '../../composables/image/useImageGeneration'
-import { useImageInputPreparation } from '../../composables/image/useImageInputPreparation'
 import {
     useReferenceImageActions,
     type ReferenceActionKind,
@@ -924,7 +881,6 @@ import {
     type PromptRecordChain,
     type PromptRecordType,
     type Template,
-    type TextModelConfig,
 } from '@prompt-optimizer/core'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -934,17 +890,6 @@ const router = useRouter()
 
 // Toast
 const toast = useToast();
-const { prepareInputRefs: prepareImageInputRefs } = useImageInputPreparation()
-const {
-    tooltipThemeOverrides: referenceActionTooltipThemeOverrides,
-    tooltipOverlayStyle: referenceActionTooltipOverlayStyle,
-    tooltipContentStyle: referenceActionTooltipContentStyle,
-} = useTooltipTheme({
-    maxWidth: '220px',
-    whiteSpace: 'normal',
-    overflowWrap: 'break-word',
-    padding: '10px 12px',
-})
 
 // 服务注入
 const services = inject<Ref<AppServices | null>>("services", ref(null));
@@ -1037,15 +982,8 @@ const isOptimizing = ref(false)
 const isAnalyzing = ref(false)
 const isIterating = ref(false)
 const isExtractingFromImage = ref(false)
-const extractImageInputRef = ref<HTMLInputElement | null>(null)
-type ReferenceImagePayload = {
-    base64: string
-    mimeType: string
-}
-
-const referenceImagePayload = ref<ReferenceImagePayload | null>(null)
-const referenceActionPendingCount = ref(0)
-const referenceActionPreviewToken = ref(0)
+const showReferenceDialog = ref(false)
+const checkingReferenceModel = ref(false)
 
 // 历史管理专用 ref（不写入 session store）
 const currentChainId = ref('')
@@ -1150,36 +1088,6 @@ const advancedModeEnabled = false
 
 const selectedTemplate = templateSelection.selectedTemplate
 
-const ensureModelManagerInitializedIfSupported = async (manager: unknown) => {
-    if (!manager || typeof manager !== 'object') return
-
-    const maybeInitializable = manager as { ensureInitialized?: () => Promise<void> }
-    if (typeof maybeInitializable.ensureInitialized === 'function') {
-        await maybeInitializable.ensureInitialized()
-    }
-}
-
-const getImageRecognitionModelConfig = async (): Promise<TextModelConfig> => {
-    const manager = services.value?.modelManager
-    if (!manager) {
-        throw new Error(t('toast.error.serviceInit'))
-    }
-
-    await ensureModelManagerInitializedIfSupported(manager)
-    await functionModelManager.initialize()
-
-    const modelKey = functionModelManager.effectiveImageRecognitionModel.value || ''
-    if (!modelKey) {
-        throw new Error(t('functionModel.noImageRecognitionModel'))
-    }
-
-    const modelConfig = await manager.getModel(modelKey)
-    if (!modelConfig) {
-        throw new Error(t('functionModel.noImageRecognitionModel'))
-    }
-
-    return modelConfig
-}
 
 const openFunctionModelManager = () => {
     if (appOpenModelManager) {
@@ -1783,10 +1691,7 @@ const handleClearContent = () => {
     currentChainId.value = ''
     currentVersions.value = []
     currentVersionId.value = ''
-    referenceImagePayload.value = null
-    referenceActionPendingCount.value = 0
-    referenceActionPreviewToken.value = 0
-    isExtractingFromImage.value = false
+    closeReferenceDialog()
     referenceAction.resetState()
     session.clearContent()
     handleClearEvaluation()
@@ -2095,116 +2000,47 @@ const referenceActionStatusLabelKey = computed(() => {
     return ''
 })
 
-const resolveReferenceActionMode = (
-    actionKind: ReferenceActionKind,
-): ReferenceApplicationMode => (actionKind === 'style-learn' ? 'migrate' : 'replicate')
-
-const resolveReferenceActionPreview = async (
-    actionKind: ReferenceActionKind = referenceAction.actionKind,
-    previewToken: number = referenceActionPreviewToken.value,
-) => {
-    if (!referenceImagePayload.value) {
-        return false
-    }
-
-    const modelConfig = await getImageRecognitionModelConfig()
-
-    const preview = await resolveReferencePromptPreview({
-        mode: resolveReferenceActionMode(actionKind),
-        originalPrompt: referenceAction.currentPromptSnapshot,
-        modelConfig,
-        imageB64: referenceImagePayload.value.base64,
-        mimeType: referenceImagePayload.value.mimeType || 'image/png',
-        templateManager: services.value?.templateManager,
-        referenceMode: 'text2image',
-    })
-
-    if (previewToken !== referenceActionPreviewToken.value) {
-        return false
-    }
-
-    referenceAction.setResultPreview(preview)
-    if (!referenceAction.applyToCurrentPrompt()) {
-        return false
-    }
-
-    queueSessionSave()
-    toast.success(t('imageWorkspace.referenceImage.applySuccess'))
-    return true
+const closeReferenceDialog = () => {
+    checkingReferenceModel.value = false
+    showReferenceDialog.value = false
+    isExtractingFromImage.value = false
 }
 
-const beginReferenceActionTask = () => {
-    referenceActionPendingCount.value += 1
-    isExtractingFromImage.value = true
-    referenceAction.beginProcessing()
-}
+const triggerReferenceAction = async (actionKind: ReferenceActionKind) => {
+    if (checkingReferenceModel.value || showReferenceDialog.value || isOptimizing.value) return
+    if (actionKind === 'style-learn' && !referenceAction.canTriggerStyleLearning) return
 
-const endReferenceActionTask = () => {
-    referenceActionPendingCount.value = Math.max(0, referenceActionPendingCount.value - 1)
-    isExtractingFromImage.value = referenceActionPendingCount.value > 0
-}
-
-const createReferenceActionPreviewToken = () => {
-    referenceActionPreviewToken.value += 1
-    return referenceActionPreviewToken.value
-}
-
-const triggerReferenceAction = (actionKind: ReferenceActionKind) => {
-    if (isExtractingFromImage.value) {
-        return
-    }
-
-    if (actionKind === 'style-learn' && !referenceAction.canTriggerStyleLearning) {
-        return
-    }
-
-    referenceAction.requestAction(actionKind)
-    extractImageInputRef.value?.click()
-}
-
-const handleReferenceImageFileChange = async (event: Event) => {
-    const input = event.target as HTMLInputElement | null
-    const file = input?.files?.[0] || null
-
-    if (input) {
-        input.value = ''
-    }
-
-    if (!file || isExtractingFromImage.value) {
-        return
-    }
-
-    if (!effectiveImageRecognitionModelKey.value) {
-        promptConfigureImageRecognitionModel()
-        return
-    }
-
-    const preparedInputs = await prepareImageInputRefs([file])
-    if (!preparedInputs) {
-        return
-    }
-    const preparedInput = preparedInputs[0]
-
-    const nextActionKind = referenceAction.actionKind
-    const previewToken = createReferenceActionPreviewToken()
-    beginReferenceActionTask()
-
+    checkingReferenceModel.value = true
     try {
-        const { b64: base64, mimeType = 'image/png' } = preparedInput
-        referenceAction.setSourceImagePreview(`data:${mimeType || 'image/png'};base64,${base64}`)
-        referenceImagePayload.value = {
-            base64,
-            mimeType: mimeType || 'image/png',
+        await functionModelManager.initialize()
+        if (!checkingReferenceModel.value) return
+        if (!effectiveImageRecognitionModelKey.value) {
+            promptConfigureImageRecognitionModel()
+            return
         }
-        await resolveReferenceActionPreview(nextActionKind, previewToken)
-    } catch (error) {
-        const errorMessage = getI18nErrorMessage(error, t('imageWorkspace.input.extractFailed'))
-        referenceAction.setError(errorMessage)
-        toast.error(errorMessage)
+        referenceAction.requestAction(actionKind)
+        showReferenceDialog.value = true
+    } catch (cause) {
+        if (checkingReferenceModel.value) toast.error(getI18nErrorMessage(cause))
     } finally {
-        endReferenceActionTask()
+        checkingReferenceModel.value = false
     }
 }
+
+const applyReferenceResult = (preview: ReferencePromptPreview, imageSrc: string) => {
+    referenceAction.setSourceImagePreview(imageSrc)
+    referenceAction.setResultPreview(preview)
+    if (referenceAction.applyToCurrentPrompt()) {
+        queueSessionSave()
+        toast.success(t('imageWorkspace.referenceImage.applySuccess'))
+    }
+    closeReferenceDialog()
+}
+
+// A different brief can be loaded while an image is being analyzed.
+watch(originalPrompt, () => {
+    if (showReferenceDialog.value) closeReferenceDialog()
+})
 
 // 注入 App 层统一的 openTemplateManager / openModelManager / handleSaveFavorite 接口
 type TemplateEntryType = Template['metadata']['templateType']
@@ -2714,6 +2550,7 @@ onMounted(async () => {
 
 // 清理
 onUnmounted(() => {
+    closeReferenceDialog()
     console.log("[ImageText2ImageWorkspace] Cleaning up...");
     if (typeof window !== "undefined") {
         window.removeEventListener(
@@ -2811,19 +2648,12 @@ defineExpose({
     min-height: 0;
 }
 
-.header-utility-button {
-    border-radius: 999px;
-    font-weight: 500;
-}
 
 .reference-action-toolbar {
     min-width: 0;
     flex-wrap: wrap;
 }
 
-.reference-action-button-wrap {
-    display: inline-flex;
-}
 
 .reference-action-anchor {
     display: inline-flex;

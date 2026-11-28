@@ -1,6 +1,7 @@
 export default {
   "video": {
     "reverse": {
+      "action": "復刻",
       "title": "複刻影片",
       "file": "本機檔案",
       "url": "影片連結",
@@ -15,8 +16,6 @@ export default {
       "invalidUrl": "請輸入完整的 http:// 或 https:// 影片連結。",
       "largeFileHint": "影片檔案超過 20 MB，內嵌上傳可能較慢或超出部分模型限制；若失敗可改用影片連結。",
       "analyzing": "正在分析影片內容，通常需要 10–30 秒…",
-      "modelLabel": "目前模型",
-      "changeModel": "切換",
       "generate": "產生提示詞",
       "hint": "將參考影片傳給影片理解模型，產生的提示詞會填入「創作要求」。",
       "invalidResult": "無法從模型回覆中讀取提示詞正文。",

@@ -1,6 +1,7 @@
 export default {
   "video": {
     "reverse": {
+      "action": "Replicate",
       "title": "Replicate video",
       "file": "Local file",
       "url": "Video URL",
@@ -15,8 +16,6 @@ export default {
       "invalidUrl": "Enter a complete http:// or https:// video URL.",
       "largeFileHint": "This file is over 20 MB. Inline upload may be slow or rejected by some models; use a video URL if it fails.",
       "analyzing": "Analyzing video content, usually takes 10–30 seconds…",
-      "modelLabel": "Model",
-      "changeModel": "Change",
       "generate": "Generate prompt",
       "hint": "Send the reference video to your video understanding model and use the resulting prompt as your creative brief.",
       "invalidResult": "Could not read the prompt from the model’s response.",

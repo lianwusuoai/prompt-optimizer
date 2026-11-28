@@ -255,6 +255,8 @@ const messages = {
     "confirmAddAriaLabel": "Confirm add model"
   },
   "functionModel": {
+    "currentModel": "Model: {model}",
+    "changeModel": "Change",
     "evaluationModel": "Evaluation Model",
     "evaluationModelPlaceholder": "Default: use global optimization model",
     "evaluationModelUnavailable": "The configured evaluation model is disabled or deleted. Available models will be selected in the default order.",

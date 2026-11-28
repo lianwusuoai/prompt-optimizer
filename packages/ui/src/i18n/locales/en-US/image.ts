@@ -56,6 +56,9 @@ const messages = {
       "extractFailed": "Image extraction failed"
     },
     "referenceImage": {
+      "pickHint": "Choose, drop, or paste a reference image",
+      "analyzing": "Analyzing the reference image…",
+      "generate": "Generate prompt",
       "replicateAction": "Replicate",
       "replicateActionDescription": "Ignore the current prompt and infer a reusable prompt from the reference image",
       "styleLearnAction": "Style Learn",

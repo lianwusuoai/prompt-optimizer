@@ -9,13 +9,17 @@ const readWorkspaceSource = () =>
   )
 
 describe('reference image workspace theme guards', () => {
-  it('uses dual entry actions with thumbnail and direct apply flow, and removes the legacy modal flow', () => {
+  it('shares the themed entry button with video and applies the result from the image picker', () => {
     const source = readWorkspaceSource()
+    const sharedButton = readFileSync(resolve(process.cwd(), 'src/components/media/ReferenceActionButton.vue'), 'utf8')
+    const video = readFileSync(resolve(process.cwd(), 'src/components/video-mode/VideoReverseAction.vue'), 'utf8')
 
     expect(source).toMatch(/referenceActionButtons/)
-    expect(source).toMatch(/referenceActionTooltipThemeOverrides/)
-    expect(source).toMatch(/referenceActionTooltipOverlayStyle/)
-    expect(source).toMatch(/referenceActionTooltipContentStyle/)
+    expect(source).toContain('<ReferenceActionButton')
+    expect(video).toContain('<ReferenceActionButton')
+    expect(sharedButton).toContain('<ThemedTooltip')
+    expect(source).toContain('<ImageReferenceDialog')
+    expect(source).toContain('@apply="applyReferenceResult"')
     expect(source).toMatch(/reference-action-\$\{button\.kind\}-button/)
     expect(source).toMatch(/triggerReferenceAction\(button\.kind\)/)
     expect(source).toMatch(/imageWorkspace\.referenceImage\.replicateAction/)
@@ -30,7 +34,6 @@ describe('reference image workspace theme guards', () => {
     expect(source).toMatch(/setResultPreview/)
     expect(source).not.toMatch(/<NModal/)
     expect(source).not.toMatch(/<NPopover/)
-    expect(source).not.toMatch(/reference-dialog-/)
     expect(source).not.toMatch(/image-text2image-extract-button/)
     expect(source).not.toMatch(/detectedCurrentPromptTitle/)
     expect(source).not.toMatch(/handleReferenceActionApply/)

@@ -1,18 +1,11 @@
 <template>
-  <NButton
-    type="tertiary"
-    size="small"
-    ghost
-    class="video-reverse-trigger"
-    :loading="checking"
-    :disabled="disabled || checking || !services"
-    :title="t('video.reverse.title')"
-    data-testid="video-reverse-open"
-    @click="open"
+  <ReferenceActionButton
+    :label="t('video.reverse.action')" :description="t('video.reverse.hint')"
+    :loading="checking" :disabled="disabled || checking || !services"
+    data-testid="video-reverse-open" @click="open"
   >
-    <template #icon><Clapperboard :size="15" /></template>
-    {{ t('video.reverse.title') }}
-  </NButton>
+    <template #icon><Clapperboard /></template>
+  </ReferenceActionButton>
 
   <AdaptiveModal
     :show="show"
@@ -36,14 +29,7 @@
             <NRadioButton value="url" data-testid="video-reverse-url-mode">{{ t('video.reverse.url') }}</NRadioButton>
           </NRadioGroup>
 
-          <div class="video-reverse-model" data-testid="video-reverse-model">
-            <NText depth="3" class="video-reverse-model__label" :title="activeModelLabel || t('model.select.noAvailableModels')">
-              {{ t('video.reverse.modelLabel') }}：{{ activeModelLabel || t('model.select.noAvailableModels') }}
-            </NText>
-            <NButton text size="tiny" type="primary" :disabled="busy" data-testid="video-reverse-change-model" @click="changeModel">
-              {{ t('video.reverse.changeModel') }}
-            </NButton>
-          </div>
+          <ReferenceModelSwitch kind="video" test-id="video-reverse" :disabled="busy" @change="openModels('function')" />
         </div>
 
         <NInput
@@ -180,7 +166,7 @@ import { computed, inject, nextTick, onBeforeUnmount, ref, shallowRef, watch, ty
 import { NAlert, NButton, NInput, NRadioButton, NRadioGroup, NSpace, NSpin, NText } from 'naive-ui'
 import { Clapperboard, Film, Upload, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import { decodeTextModelSelection, TemplateProcessor } from '@prompt-optimizer/core'
+import { TemplateProcessor } from '@prompt-optimizer/core'
 import { useFunctionModelManager } from '../../composables/model/useFunctionModelManager'
 import { useToast } from '../../composables/ui/useToast'
 import { useVideoCreateSession } from '../../stores/session/useVideoCreateSession'
@@ -188,6 +174,8 @@ import { extractVideoPrompt, readReferenceVideo } from '../../services/video-pro
 import { getI18nErrorMessage } from '../../utils/error'
 import type { AppServices } from '../../types/services'
 import AdaptiveModal from '../common/AdaptiveModal.vue'
+import ReferenceActionButton from '../media/ReferenceActionButton.vue'
+import ReferenceModelSwitch from '../media/ReferenceModelSwitch.vue'
 
 const LARGE_VIDEO_WARNING_BYTES = 20 * 1024 * 1024
 const VIDEO_FILE_EXTENSION_RE = /\.(?:mp4|webm|mov|m4v|mkv|avi|mpeg|mpg|ogv|3gp|flv|ts|wmv)$/i
@@ -214,7 +202,6 @@ const durationSeconds = ref<number | null>(null)
 const url = ref('')
 const error = ref('')
 const pendingResult = ref('')
-const activeModelLabel = ref('')
 const dragDepth = ref(0)
 let revision = 0
 
@@ -379,52 +366,13 @@ function close() {
   pendingResult.value = ''
 }
 
-function changeModel() {
-  if (busy.value) return
-  openModels('function')
-}
-
-async function resolveModelLabel(key: string): Promise<string> {
-  if (!key) return ''
-  const decoded = decodeTextModelSelection(key)
-  try {
-    const config = await services.value?.modelManager?.getModel(key)
-    if (config) {
-      const modelId = decoded?.modelId || config.modelMeta?.id || config.modelId
-      const configName = config.name || config.id
-      return modelId && modelId !== configName ? `${configName} · ${modelId}` : (configName || modelId || key)
-    }
-  } catch { /* Fall back to the raw key when metadata cannot be resolved. */ }
-  return decoded?.modelId ? `${decoded.configId} · ${decoded.modelId}` : key
-}
-
-let modelLabelRevision = 0
-async function syncActiveModel(refreshModels = false) {
-  const current = ++modelLabelRevision
-  if (refreshModels) await models.refresh?.()
-  if (current !== modelLabelRevision) return
-  const key = models.effectiveVideoUnderstandingModel.value
-  const label = await resolveModelLabel(key)
-  if (current === modelLabelRevision) activeModelLabel.value = label
-}
-
-const onModelsRefreshed = () => {
-  if (show.value) void syncActiveModel(true)
-}
-
 watch(show, visible => {
   if (typeof window === 'undefined') return
   if (visible) {
     window.addEventListener('paste', onPaste)
-    window.addEventListener('video-workspace-refresh-models', onModelsRefreshed)
   } else {
     window.removeEventListener('paste', onPaste)
-    window.removeEventListener('video-workspace-refresh-models', onModelsRefreshed)
   }
-})
-
-watch(() => models.effectiveVideoUnderstandingModel.value, () => {
-  if (show.value) void syncActiveModel()
 })
 
 watch(sourceKind, async kind => {
@@ -439,7 +387,6 @@ watch(sourceKind, async kind => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('paste', onPaste)
-    window.removeEventListener('video-workspace-refresh-models', onModelsRefreshed)
   }
   close()
 })
@@ -451,14 +398,11 @@ async function configuredModel(at: number) {
   if (at !== revision) return ''
   const key = models.effectiveVideoUnderstandingModel.value
   if (!key) {
-    activeModelLabel.value = ''
     if (!show.value) close()
     toast.error(t('functionModel.noVideoUnderstandingModel'))
     openModels('function')
     return ''
   }
-  const label = await resolveModelLabel(key)
-  if (at === revision) activeModelLabel.value = label
   return key
 }
 
@@ -535,22 +479,6 @@ async function generate() {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
-}
-
-.video-reverse-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: 12px;
-}
-
-.video-reverse-model__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
 }
 
 .video-drop-surface {

@@ -17,9 +17,12 @@
                   <NText class="source-summary-title" depth="1">{{ t('video.promptLabel') }}</NText>
                   <NText class="source-summary-text" depth="3">{{ state.originalPrompt }}</NText>
                 </NFlex>
-                <NButton type="tertiary" size="small" ghost round :aria-label="t('common.expand')" @click="inputCollapsed = false">
-                  <template #icon><ChevronDown /></template>
-                </NButton>
+                <NFlex class="source-summary-group" align="center" :size="8" :wrap="false">
+                  <VideoReverseAction :disabled="workspaceBusy" :compact="isCompact" />
+                  <NButton type="tertiary" size="small" ghost round :aria-label="t('common.expand')" @click="inputCollapsed = false">
+                    <template #icon><ChevronDown /></template>
+                  </NButton>
+                </NFlex>
               </NFlex>
               <div v-show="!inputCollapsed" class="workspace-input-panel">
                 <InputPanel v-model="state.originalPrompt" test-id-prefix="video" :compact="isCompact"
@@ -28,7 +31,7 @@
                   :button-text="t('imageWorkspace.input.optimizePrompt')" :compact-button-text="t('common.optimize')" :loading-text="t('common.loading')" :loading="session.optimizing"
                   :disabled="!selectedTextModelKey || !selectedTemplateId || !templateOptions.length || !!uploading || session.iterating" @submit="writePrompt()">
                   <template #header-actions>
-                    <VideoReverseAction :disabled="workspaceBusy" :compact="isCompact" />
+                    <VideoReverseAction v-if="!inputCollapsed" :disabled="workspaceBusy" :compact="isCompact" />
                   </template>
                   <template #header-extra>
                     <NButton type="tertiary" size="small" ghost round :aria-label="t('common.collapse')" @click="inputCollapsed = true">
