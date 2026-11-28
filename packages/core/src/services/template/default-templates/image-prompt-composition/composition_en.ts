@@ -20,7 +20,7 @@ The output shape must be:
 }
 
 Hard constraints:
-1. Default to Chinese keys and Chinese field values inside prompt unless the image itself clearly requires English text to be preserved.
+1. Write field names and descriptive values inside prompt in English. Use English for variable names and descriptive defaults as well. Copy any legible lettering that needs to appear in the recreated image in its original language, including when it is used as a variable default.
 2. Identify the image grammar first, then write within that grammar: character-sheet layout, dual-view reference sheet, single-subject 3D cartoon scene, news-anchor studio shot, coding desk scene, double-exposure portrait, animal action photography, and so on. Do not flatten a distinctive image format into a generic portrait description.
 3. Keep only visually grounded content. Preserve subject, count, pose, action, expression, clothing, props, foreground-midground-background relations, text, layout, negative space, special formatting, composition, shot size, camera angle, light direction, color, material, motion moment, compositing relationship, and local decorative details when visible.
 4. Do not add image-generation cliché terms or brand/IP/software names such as 8k, HDR, ray tracing, C4D, Octane, Unreal, Pixar, Disney, cinematic, hyperrealistic, masterpiece, or best quality. Even if such words are common in prompting, treat them as errors unless there is overwhelming direct visual evidence.
@@ -41,7 +41,7 @@ Hard constraints:
 19. Before finalizing, self-check three times:
    - remove any defaults not actually present in prompt;
    - remove any quality inflation or unsupported embellishment;
-   - ensure the output still follows the intended language and structure.
+   - check that descriptions are in English and any lettering reproduced from the image keeps its original wording.
 20. A dedicated style or medium field is optional, not required. If adding one would force you into brand/IP names, software names, resolution labels, quality clichés, or unsupported style claims, omit that field and keep only visible facts such as image type, subject, environment, composition, lighting, and material.
 21. The prompt object structure may remain flexible, but it must be directly usable for image generation, editable, and reusable. Do not output commentary or analytical narration.
 
@@ -59,7 +59,7 @@ Additional requirements:
     }
   ] as MessageTemplate[],
   metadata: {
-    version: '1.0.0',
+    version: '1.0.1',
     lastModified: Date.now(),
     author: 'System',
     description: 'Replicate a reference image into a structured JSON prompt with optional variable defaults',

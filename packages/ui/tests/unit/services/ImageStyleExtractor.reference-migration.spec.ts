@@ -104,6 +104,35 @@ describe('ImageStyleExtractor reference migration pipeline', () => {
     expect(phases).toEqual(['generating-preview'])
   })
 
+  it('选择英文功能提示词后，图像复刻要求用英文描述并保留画面中的原文', async () => {
+    const core = await vi.importActual<typeof import('@prompt-optimizer/core')>('@prompt-optimizer/core')
+    const storage = new core.MemoryStorageProvider()
+    const language = core.createTemplateLanguageService(core.createPreferenceService(storage))
+    const templateManager = core.createTemplateManager(storage, language)
+    await language.initialize()
+    await templateManager.changeBuiltinTemplateLanguage('en-US')
+    mockProcessTemplate.mockImplementationOnce((template, context) => core.TemplateProcessor.processTemplate(template, context))
+    mockUnderstand.mockResolvedValueOnce({
+      content: JSON.stringify({ prompt: { sign: '营业中' }, defaults: {} }),
+    })
+
+    const preview = await resolveReferencePromptPreview({
+      mode: 'replicate',
+      originalPrompt: '',
+      imageB64: 'ZmFrZS1pbWFnZQ==',
+      mimeType: 'image/png',
+      modelConfig,
+      templateManager,
+    })
+
+    const [request] = mockUnderstand.mock.calls[0]
+    expect(request.systemPrompt).toContain('field names and descriptive values inside prompt in English')
+    expect(request.systemPrompt).toContain('in its original language')
+    expect(request.systemPrompt).not.toContain('Default to Chinese')
+    expect(request.userPrompt).toContain('No original prompt is provided')
+    expect(JSON.parse(preview.prompt)).toEqual({ sign: '营业中' })
+  })
+
   it('风格迁移时，单次视觉调用保留原始主体语义并吸收参考图风格', async () => {
     const templateManager = {
       getTemplate: vi.fn().mockResolvedValue({
