@@ -36,9 +36,9 @@
             <NRadioButton value="url" data-testid="video-reverse-url-mode">{{ t('video.reverse.url') }}</NRadioButton>
           </NRadioGroup>
 
-          <div v-if="activeModelLabel" class="video-reverse-model" data-testid="video-reverse-model">
-            <NText depth="3" class="video-reverse-model__label" :title="activeModelLabel">
-              {{ t('video.reverse.modelLabel') }}：{{ activeModelLabel }}
+          <div class="video-reverse-model" data-testid="video-reverse-model">
+            <NText depth="3" class="video-reverse-model__label" :title="activeModelLabel || t('model.select.noAvailableModels')">
+              {{ t('video.reverse.modelLabel') }}：{{ activeModelLabel || t('model.select.noAvailableModels') }}
             </NText>
             <NButton text size="tiny" type="primary" :disabled="busy" data-testid="video-reverse-change-model" @click="changeModel">
               {{ t('video.reverse.changeModel') }}
@@ -244,7 +244,9 @@ const fileStats = computed(() => {
 })
 
 function isVideoFile(candidate: File): boolean {
-  if (candidate.type) return candidate.type.startsWith('video/')
+  if (candidate.type && candidate.type !== 'application/octet-stream') {
+    return candidate.type.startsWith('video/')
+  }
   return VIDEO_FILE_EXTENSION_RE.test(candidate.name)
 }
 
@@ -449,7 +451,8 @@ async function configuredModel(at: number) {
   if (at !== revision) return ''
   const key = models.effectiveVideoUnderstandingModel.value
   if (!key) {
-    close()
+    activeModelLabel.value = ''
+    if (!show.value) close()
     toast.error(t('functionModel.noVideoUnderstandingModel'))
     openModels('function')
     return ''

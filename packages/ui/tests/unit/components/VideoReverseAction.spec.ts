@@ -133,6 +133,17 @@ describe('VideoReverseAction', () => {
     expect(wrapper.get('[data-testid="video-reverse-error"]').text()).toBe('video.reverse.invalidFile')
     expect(wrapper.find('[data-testid="video-reverse-preview-card"]').exists()).toBe(false)
 
+    const unknownText = new File(['hello'], 'notes.txt', { type: 'application/octet-stream' })
+    dropzone.element.dispatchEvent(createDragEvent('drop', { files: [unknownText], types: ['Files'] }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="video-reverse-error"]').text()).toBe('video.reverse.invalidFile')
+    expect(wrapper.find('[data-testid="video-reverse-preview-card"]').exists()).toBe(false)
+
+    const genericMp4 = new File([new Uint8Array(1024)], 'generic.mp4', { type: 'application/octet-stream' })
+    dropzone.element.dispatchEvent(createDragEvent('drop', { files: [genericMp4], types: ['Files'] }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="video-reverse-preview-card"]').text()).toContain('generic.mp4')
+
     const clip = new File([new Uint8Array(2048)], 'sample.mp4', { type: 'video/mp4' })
     dropzone.element.dispatchEvent(createDragEvent('dragenter', { files: [clip], types: ['Files'] }))
     await flushPromises()
@@ -207,6 +218,14 @@ describe('VideoReverseAction', () => {
     expect(openModels).toHaveBeenCalledWith('function')
     expect(wrapper.find('[data-testid="modal-stub"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="video-reverse-preview-card"]').text()).toContain('keep-me.mp4')
+
+    effectiveModel.value = ''
+    await wrapper.get('[data-testid="video-reverse-generate"]').trigger('click')
+    await flushPromises()
+    expect(openModels).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="modal-stub"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="video-reverse-preview-card"]').text()).toContain('keep-me.mp4')
+    expect(wrapper.find('[data-testid="video-reverse-change-model"]').exists()).toBe(true)
 
     wrapper.unmount()
   })
