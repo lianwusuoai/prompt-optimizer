@@ -60,9 +60,9 @@ const messages = {
       "analyzing": "Analyzing the reference image…",
       "generate": "Generate prompt",
       "replicateAction": "Replicate",
-      "replicateActionDescription": "Ignore the current prompt and infer a reusable prompt from the reference image",
+      "replicateActionDescription": "Generate a reusable prompt from the reference image and replace the current prompt",
       "styleLearnAction": "Style Learn",
-      "styleLearnActionDescription": "Keep the current subject and learn the style, composition, and color language from the image",
+      "styleLearnActionDescription": "Keep the current subject, blend in the reference image's style, composition, and color, and update the current prompt",
       "styleLearnDisabledHint": "Enter what you want to generate first",
       "processingStatus": "Processing",
       "readyStatus": "Ready",
@@ -73,7 +73,7 @@ const messages = {
       "variablePreview": "Extracted Variables",
       "noVariables": "No variables have been extracted yet",
       "applyToPrompt": "Apply To Current Prompt",
-      "applySuccess": "Inserted into the current prompt"
+      "applySuccess": "Updated the current prompt"
     },
     "generation": {
       "imageModel": "Image Model",

@@ -60,9 +60,9 @@ const messages = {
       "analyzing": "正在识别参考图…",
       "generate": "生成提示词",
       "replicateAction": "复刻",
-      "replicateActionDescription": "忽略当前提示词，以参考图为主反推提示词和变量",
+      "replicateActionDescription": "根据参考图生成可复用的提示词，并替换当前提示词",
       "styleLearnAction": "风格学习",
-      "styleLearnActionDescription": "保留当前提示词主体，只学习参考图的风格、构图和色彩",
+      "styleLearnActionDescription": "保留当前提示词主体，融合参考图的风格、构图和色彩，并更新当前提示词",
       "styleLearnDisabledHint": "请先输入你想画什么",
       "processingStatus": "处理中",
       "readyStatus": "已生成",
@@ -73,7 +73,7 @@ const messages = {
       "variablePreview": "提取到的变量",
       "noVariables": "当前还没有提取到变量",
       "applyToPrompt": "应用到当前提示词",
-      "applySuccess": "已写入当前提示词"
+      "applySuccess": "已更新当前提示词"
     },
     "generation": {
       "imageModel": "图像模型",
