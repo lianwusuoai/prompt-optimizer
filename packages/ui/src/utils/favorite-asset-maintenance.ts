@@ -39,6 +39,7 @@ const safeGetFavorite = async (
 export const runFavoriteAssetGc = async (
   favoriteManager: Pick<IFavoriteManager, 'getFavorites'>,
   favoriteImageStorageService: Pick<IImageStorageService, 'listAllMetadata' | 'deleteImages'> | null | undefined,
+  canDelete: () => boolean = () => true,
 ): Promise<FavoriteAssetGcResult> => {
   if (!favoriteImageStorageService) {
     return {
@@ -58,12 +59,11 @@ export const runFavoriteAssetGc = async (
     .map((metadata) => metadata.id)
     .filter((id) => !referencedIds.has(id))
 
-  if (orphanIds.length > 0) {
-    await favoriteImageStorageService.deleteImages(orphanIds)
-  }
+  const deletedIds = canDelete() ? orphanIds : []
+  if (deletedIds.length > 0) await favoriteImageStorageService.deleteImages(deletedIds)
 
   return {
-    deletedIds: orphanIds,
+    deletedIds,
     referencedIds: Array.from(referencedIds),
   }
 }

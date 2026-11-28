@@ -62,6 +62,9 @@ const {
 const { showStorageStartupErrorDialog } = require('./config/storage-startup-error');
 const { setupRemoteStorageHandlers } = require('./remote-storage');
 const path = require('path');
+const { pathToFileURL } = require('node:url');
+const desktopDevUrl = 'http://localhost:18181/';
+const webDistPath = path.join(__dirname, 'web-dist/index.html');
 
 // 确定正确的配置文件路径
 // 在生产环境中，优先从exe所在目录查找.env.local文件
@@ -421,32 +424,6 @@ function setupPreferenceHandlers() {
   });
 }
 
-// 构建注入到渲染进程的运行时配置脚本（双份键：带前缀与不带前缀）
-function buildRuntimeConfigScriptFromEnv() {
-  try {
-    const entries = Object.entries(process.env)
-      .filter(([k, v]) => k.startsWith('VITE_') && v !== undefined && v !== null && String(v).length > 0);
-
-    const props = [];
-    for (const [k, v] of entries) {
-      const val = String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const noPrefix = k.replace(/^VITE_/, '');
-      props.push([noPrefix, val]);
-      props.push([k, val]);
-    }
-
-    const body = props.map(([key, val]) => `  ${key}: "${val}"`).join(',\n');
-
-    return `// Injected by Electron main process\n`
-      + `window.runtime_config = Object.assign({}, (window.runtime_config || {}), {\n`
-      + `${body}\n`
-      + `});\n`
-      + `console.log('[Main Process] runtime_config injected with ${entries.length} VITE_* vars (dual keys)');\n`;
-  } catch (e) {
-    return `console.warn('[Main Process] Failed to build runtime_config:', ${JSON.stringify(String(e))});`;
-  }
-}
-
 function createWindow() {
   // Create the browser window.
   // 根据平台选择合适的图标文件
@@ -559,11 +536,10 @@ function createWindow() {
   // In development, we can point to the vite dev server
   if (process.env.NODE_ENV === 'development') {
     console.log('[Main Process] Running in development mode, loading from Vite dev server');
-    mainWindow.loadURL('http://localhost:18181');
+    mainWindow.loadURL(desktopDevUrl);
     mainWindow.webContents.openDevTools();
   } else {
     // In production, load the built file from the web package
-    const webDistPath = path.join(__dirname, 'web-dist/index.html');
     console.log('[Main Process] Loading web app from:', webDistPath);
     if (require('fs').existsSync(webDistPath)) {
       mainWindow.loadFile(webDistPath);
@@ -1235,25 +1211,6 @@ function setupIPC() {
       return createErrorResponse(error);
     }
   }));
-
-  // 在页面加载前拦截 /config.js 并注入运行时环境变量（双份键）
-  try {
-    const ses = (mainWindow && mainWindow.webContents && mainWindow.webContents.session) || session.defaultSession;
-    if (ses && ses.webRequest && typeof ses.webRequest.onBeforeRequest === 'function') {
-      const filter = { urls: ['*://*/*', 'file://*/*'] };
-      ses.webRequest.onBeforeRequest(filter, (details, callback) => {
-        if (/\/config\.js(\?.*)?$/i.test(details.url)) {
-          const script = buildRuntimeConfigScriptFromEnv();
-          const dataUrl = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(script);
-          return callback({ redirectURL: dataUrl });
-        }
-        return callback({});
-      });
-      console.log('[Main Process] Runtime config (config.js) interceptor registered');
-    }
-  } catch (e) {
-    console.warn('[Main Process] Unable to register runtime config interceptor:', e);
-  }
 
   // 自定义会话测试（支持工具、变量、对话消息）
   ipcMain.handle('prompt-testCustomConversationStream', withModelNetwork(async (event, request, streamId) => {
@@ -2349,6 +2306,12 @@ function setupIPC() {
   // 环境配置同步 - 主进程作为唯一配置源
   ipcMain.handle('config-getEnvironmentVariables', async (event) => {
     try {
+      const entry = process.env.NODE_ENV === 'development' ? desktopDevUrl : pathToFileURL(webDistPath).href;
+      const frame = event.senderFrame;
+      if (event.sender !== mainWindow?.webContents || !frame || frame !== event.sender.mainFrame
+          || frame.url.split(/[?#]/, 1)[0] !== entry) {
+        throw new Error('Runtime configuration requires the desktop app window');
+      }
       // 自动透传所有 VITE_* 变量并附加无前缀副本
       const viteEnv = Object.fromEntries(
         Object.entries(process.env)

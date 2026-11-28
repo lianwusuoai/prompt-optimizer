@@ -6,8 +6,9 @@ import { DEFAULT_VITE_ENV } from '../core/src/utils/default-env'
 import { createPwaPlugin } from './pwa.config'
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const monorepoRoot = resolve(__dirname, '../..')
+  const desktopDev = command === 'serve' && process.env.ELECTRON_BUILD === 'true'
   const env = loadEnv(mode, monorepoRoot)
   const processEnv = {
     ...DEFAULT_VITE_ENV,
@@ -17,12 +18,14 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: monorepoRoot,
     plugins: [vue(), createPwaPlugin()],
+    css: desktopDev ? { postcss: resolve(__dirname, '../ui') } : undefined,
     server: {
       port: 18181,
+      strictPort: desktopDev,
       host: true,
       fs: {
         // 允许为工作区依赖提供服务
-        allow: ['..']
+        allow: desktopDev ? ['..', resolve(monorepoRoot, 'node_modules')] : ['..']
       },
       hmr: true,
       watch: {
@@ -39,11 +42,20 @@ export default defineConfig(({ mode }) => {
     },
     publicDir: 'public',
     resolve: {
-      preserveSymlinks: true,
+      preserveSymlinks: !desktopDev,
+      dedupe: desktopDev ? ['vue'] : [],
       alias: {
         '@': resolve(__dirname, 'src'),
-        '@prompt-optimizer/core': path.resolve(__dirname, '../core'),
-        '@prompt-optimizer/ui': path.resolve(__dirname, '../ui'),
+        // Rebuilding a library clears dist while the open desktop window is serving requests.
+        ...(desktopDev ? {
+          '@prompt-optimizer/ui/dist/style.css': resolve(__dirname, '../ui/src/styles/index.css'),
+          '@prompt-optimizer/ui': resolve(__dirname, '../ui/src/index.ts'),
+          '@prompt-optimizer/core/bridge-protocol': resolve(__dirname, '../core/src/bridge-protocol.ts'),
+          '@prompt-optimizer/core': resolve(__dirname, '../core/src/index.ts'),
+        } : {
+          '@prompt-optimizer/ui': resolve(__dirname, '../ui'),
+          '@prompt-optimizer/core': resolve(__dirname, '../core'),
+        }),
         '@prompt-optimizer/web': path.resolve(__dirname, '../web'),
         '@prompt-optimizer/extension': path.resolve(__dirname, '../extension')
       }

@@ -106,6 +106,22 @@ export function useAppInitializer(): {
   const error = ref<Error | null>(null);
   const startupRepairReport = ref<StartupRepairReport | null>(null);
 
+  const cleanFavoriteImagesAtStartup = (manager: IFavoriteManager, storage: IImageStorageService) => {
+    // A delayed scan must not delete images after the workspace accepts new favorites.
+    void runFavoriteAssetGc(manager, storage, () => isInitializing.value)
+      .then(({ deletedIds }) => {
+        if (deletedIds.length > 0) {
+          startupRepairReport.value = appendStartupRepairReport(startupRepairReport.value, {
+            key: 'PromptOptimizerFavoriteImageDB',
+            action: 'removed',
+            reason: 'orphan_assets_removed',
+            deletedCount: deletedIds.length,
+          })
+        }
+      })
+      .catch(err => console.warn('[AppInitializer] Favorite image cleanup skipped:', err))
+  }
+
   onMounted(async () => {
     try {
       console.log('[AppInitializer] Starting application initialization...');
@@ -197,20 +213,7 @@ export function useAppInitializer(): {
         favoriteManager = new FavoriteManagerElectronProxy();
         favoriteManager = attachFavoriteAssetGc(favoriteManager, favoriteImageStorageService)
 
-        if (favoriteImageStorageService) {
-          const favoriteAssetGcResult = await runFavoriteAssetGc(
-            favoriteManager,
-            favoriteImageStorageService,
-          )
-          if (favoriteAssetGcResult.deletedIds.length > 0) {
-            startupRepairReport.value = appendStartupRepairReport(startupRepairReport.value, {
-              key: 'PromptOptimizerFavoriteImageDB',
-              action: 'removed',
-              reason: 'orphan_assets_removed',
-              deletedCount: favoriteAssetGcResult.deletedIds.length,
-            })
-          }
-        }
+        cleanFavoriteImagesAtStartup(favoriteManager, favoriteImageStorageService)
 
         // 🆕 创建评估服务（使用代理的 llmService, modelManager, templateManager）
         evaluationService = createEvaluationService(llmService, modelManager, templateManager, {
@@ -459,20 +462,7 @@ export function useAppInitializer(): {
         favoriteManager = new FavoriteManager(storageProvider);
         favoriteManager = attachFavoriteAssetGc(favoriteManager, favoriteImageStorageService)
 
-        if (favoriteImageStorageService) {
-          const favoriteAssetGcResult = await runFavoriteAssetGc(
-            favoriteManager,
-            favoriteImageStorageService,
-          )
-          if (favoriteAssetGcResult.deletedIds.length > 0) {
-            startupRepairReport.value = appendStartupRepairReport(startupRepairReport.value, {
-              key: 'PromptOptimizerFavoriteImageDB',
-              action: 'removed',
-              reason: 'orphan_assets_removed',
-              deletedCount: favoriteAssetGcResult.deletedIds.length,
-            })
-          }
-        }
+        cleanFavoriteImagesAtStartup(favoriteManager, favoriteImageStorageService)
 
         // 🆕 创建评估服务
         evaluationService = createEvaluationService(llmService, modelManagerAdapter, templateManagerAdapter, {

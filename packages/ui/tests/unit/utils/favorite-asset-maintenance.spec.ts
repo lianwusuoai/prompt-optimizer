@@ -6,6 +6,19 @@ import {
 } from '../../../src/utils/favorite-asset-maintenance'
 
 describe('favoriteAssetMaintenance', () => {
+  it('leaves assets intact when startup finishes during the metadata scan', async () => {
+    const metadata = Promise.withResolvers<Array<{ id: string }>>()
+    const store = { listAllMetadata: vi.fn(() => metadata.promise), deleteImages: vi.fn() }
+    let initializing = true
+    const scan = runFavoriteAssetGc({ getFavorites: async () => [] }, store as any, () => initializing)
+    await Promise.resolve()
+    expect(store.listAllMetadata).toHaveBeenCalledOnce()
+    initializing = false
+    metadata.resolve([{ id: 'new-favorite-image' }])
+    expect((await scan).deletedIds).toEqual([])
+    expect(store.deleteImages).not.toHaveBeenCalled()
+  })
+
   it('deletes orphaned assets from the favorite image store', async () => {
     const favoriteManager = {
       getFavorites: vi.fn(async () => [

@@ -2153,8 +2153,6 @@ async function navigateToSubModeKey(
   await workspaceRouteSwitch.run(routerInstance.currentRoute.value.fullPath, fromPath)
 }
 
-let initTimeoutId: number | null = null
-
 const saveFailure = computed(() => {
   const key = sessionManager.getActiveSubModeKey()
   const activeFailure = sessionManager.saveFailures.get(key)
@@ -2276,45 +2274,11 @@ onMounted(() => {
     void promptRefreshForNewDeploy(error);
   });
 
-  // ⚠️ 使用 watchEffect + 独立超时定时器（Codex 建议）
-  const TIMEOUT = 10000 // 10秒超时
-
-  // ⚠️ 避免 watchEffect 回调内 stopWatch() 的 TDZ 风险
-  let stopWatch: (() => void) | null = null
-
-  // 设置超时定时器
-  initTimeoutId = window.setTimeout(() => {
-    console.error('[PromptOptimizerApp] Timed out while initializing services')
-    stopWatch?.()
-  }, TIMEOUT)
-
-  stopWatch = watchEffect(async () => {
-    // 等待 services 和初始化完成
-    if (!services.value || isInitializing.value) {
-      return
-    }
-
-    // ⚠️ 防御性检查：确保 Pinia services 已注入（防止时序竞态）
-    // 理论上 watch(services) 会先执行 setPiniaServices()，但这里添加二次确认
-    const $services = getPiniaServices()
-    if (!$services) {
-      console.warn('[PromptOptimizerApp] Pinia services are not injected yet, but services.value already exists')
-      console.warn('[PromptOptimizerApp] This may be a timing issue; waiting for the next cycle')
-      // 不调用 stopWatch()，继续等待下一轮
-      return
-    }
-    if (!$services.preferenceService) {
-      // PreferenceService 还未就绪：继续等待，避免 restoreAllSessions() 直接返回导致默认值写回覆盖持久化内容
-      return
-    }
-
-    // Services 和 Pinia 均已就绪，清除超时定时器并停止监听
+  // Disk-backed services may become available well after the first render.
+  const stopWatchingServices = watchEffect(async () => {
+    if (isInitializing.value || !services.value || !getPiniaServices()?.preferenceService) return
+    stopWatchingServices()
     console.log('[PromptOptimizerApp] Services and Pinia are ready; starting session restore')
-    if (initTimeoutId !== null) {
-      window.clearTimeout(initTimeoutId)
-      initTimeoutId = null
-    }
-    stopWatch?.()
 
     try {
       // hydrate all：避免未恢复的子模式在 saveAllSessions 时用默认空值覆盖持久化内容
@@ -2338,7 +2302,7 @@ onMounted(() => {
       // Ensure the app can render even if session restore fails.
       hasRestoredInitialState.value = true
     }
-  })
+  }, { flush: 'post' })
 })
 
 // 应用卸载前清理并保存所有会话
@@ -2349,11 +2313,6 @@ onBeforeUnmount(async () => {
 
   // 🔧 Codex 修复：设置卸载标志，阻止后续 microtask 执行恢复
   restoreCoordinator.markUnmounted();
-
-  // ⚠️ 清除初始化超时定时器（Codex 建议：避免悬挂定时器）
-  if (initTimeoutId !== null) {
-    window.clearTimeout(initTimeoutId)
-  }
 
   // ⚠️ Codex 建议：移除事件监听器，避免内存泄漏
   if (typeof window !== 'undefined') {

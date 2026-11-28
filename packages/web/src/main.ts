@@ -70,8 +70,11 @@ if (import.meta.env.VITE_VERCEL_DEPLOYMENT === 'true') {
     document.head.appendChild(script)
   }
   
-  // 延迟执行以确保DOM已完全加载
-  window.addEventListener('DOMContentLoaded', loadAnalytics)
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', loadAnalytics, { once: true })
+  } else {
+    loadAnalytics()
+  }
 }else{
     console.log('Vercel Analytics 未加载')
 }
