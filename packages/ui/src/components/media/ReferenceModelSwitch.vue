@@ -1,31 +1,55 @@
 <template>
   <div class="reference-model-switch" :data-testid="`${testId}-model`">
     <NText depth="3" class="model-label" :title="label">
-      {{ t('functionModel.currentModel', { model: label || t('model.select.noAvailableModels') }) }}
+      {{ label
+        ? t('functionModel.currentModel', { model: label })
+        : t(kind === 'image' ? 'functionModel.imageRecognitionModel' : 'functionModel.videoUnderstandingModel') }}
     </NText>
-    <NButton text size="tiny" type="primary" :disabled="disabled" :data-testid="`${testId}-change-model`" @click="$emit('change')">
-      {{ t('functionModel.changeModel') }}
+    <NButton text size="tiny" type="primary" :disabled="disabled" :data-testid="`${testId}-change-model`" @click="openSettings">
+      {{ t(key ? 'functionModel.changeModel' : 'model.select.configure') }}
     </NButton>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, watch, type Ref } from 'vue'
+import { computed, inject, onMounted, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { defaultWindow, useEventListener } from '@vueuse/core'
 import { NButton, NText } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { decodeTextModelSelection } from '@prompt-optimizer/core'
 import { useFunctionModelManager } from '../../composables/model/useFunctionModelManager'
+import { useToast } from '../../composables/ui/useToast'
+import { getI18nErrorMessage } from '../../utils/error'
 import type { AppServices } from '../../types/services'
 
 const props = defineProps<{ kind: 'image' | 'video'; testId: string; disabled: boolean }>()
-defineEmits<{ change: [] }>()
+const emit = defineEmits<{ change: [] }>()
 const { t } = useI18n()
+const toast = useToast()
 const services = inject<Ref<AppServices | null>>('services', ref(null))
 const models = useFunctionModelManager(services)
 const key = computed(() => props.kind === 'image' ? models.effectiveImageRecognitionModel.value : models.effectiveVideoUnderstandingModel.value)
 const revision = ref(0)
 const label = ref('')
+
+// Check once inside the open picker. Dismissing settings without a selection leaves the picker usable.
+let promptOnOpen = true
+function openSettings() {
+  promptOnOpen = false
+  emit('change')
+}
+onScopeDispose(() => { promptOnOpen = false })
+onMounted(async () => {
+  try {
+    await models.initialize()
+    if (promptOnOpen && !key.value && !props.disabled) {
+      toast.info(t(props.kind === 'image' ? 'functionModel.noImageRecognitionModel' : 'functionModel.noVideoUnderstandingModel'))
+      openSettings()
+    }
+  } catch (cause) {
+    if (promptOnOpen) toast.error(getI18nErrorMessage(cause))
+  }
+})
 
 // Editing the connection can change its display name or default model without changing its key.
 useEventListener(defaultWindow, props.kind === 'image' ? 'image-workspace-refresh-text-models' : 'video-workspace-refresh-models', async () => {

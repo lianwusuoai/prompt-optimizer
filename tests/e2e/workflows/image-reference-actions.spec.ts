@@ -56,14 +56,17 @@ test('previews a reference, keeps it across model changes, and applies only conf
     await expect(page.getByTestId('model-manager-dialog')).toBeHidden()
   }
 
+  await expect(replicate).toBeVisible({ timeout: 30_000 })
   await expect(learn).toBeDisabled()
   await expect(replicate).toHaveCSS('border-top-left-radius', '999px')
   await expect(replicate).toHaveCSS('font-weight', '500')
   await replicate.click()
   await expect(selector).toBeVisible()
-  await expect(dialog).toBeHidden()
-  await selectModel(firstModel)
-  await replicate.click()
+  await expect(dialog).toBeVisible()
+  await page.getByRole('dialog').filter({ has: selector }).getByRole('button', { name: 'close', exact: true }).click()
+  await expect(page.getByTestId('model-manager-dialog')).toBeHidden()
+  await expect(dialog).toBeVisible()
+  await expect(page.getByTestId('image-reference-change-model')).toHaveAccessibleName('Configure Model')
   await expect(submit).toBeDisabled()
 
   const transfer = await page.evaluateHandle(async () => {
@@ -78,6 +81,11 @@ test('previews a reference, keeps it across model changes, and applies only conf
   await expect(preview).toBeVisible()
   const imageSrc = await preview.getAttribute('src')
   expect(imageSrc).toMatch(/^data:image\/png;base64,/)
+  await submit.click()
+  await selectModel(firstModel)
+  await expect(page.getByTestId('image-reference-model')).toContainText(firstModel)
+  await expect(preview).toHaveAttribute('src', imageSrc!)
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
   await page.getByTestId('image-reference-change-model').click()
   await selectModel(secondModel)
   await expect(page.getByTestId('image-reference-model')).toContainText(secondModel)

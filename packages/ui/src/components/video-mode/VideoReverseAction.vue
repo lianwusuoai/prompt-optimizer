@@ -1,8 +1,8 @@
 <template>
   <ReferenceActionButton
     :label="t('video.reverse.action')" :description="t('video.reverse.hint')"
-    :loading="checking" :disabled="disabled || checking || !services"
-    data-testid="video-reverse-open" @click="open"
+    :disabled="disabled || !services"
+    data-testid="video-reverse-open" @click="show = true"
   >
     <template #icon><Clapperboard /></template>
   </ReferenceActionButton>
@@ -29,7 +29,7 @@
             <NRadioButton value="url" data-testid="video-reverse-url-mode">{{ t('video.reverse.url') }}</NRadioButton>
           </NRadioGroup>
 
-          <ReferenceModelSwitch kind="video" test-id="video-reverse" :disabled="busy" @change="openModels('function')" />
+          <ReferenceModelSwitch v-if="show" kind="video" test-id="video-reverse" :disabled="busy" @change="openModels('function')" />
         </div>
 
         <NInput
@@ -191,7 +191,6 @@ const toast = useToast()
 const { t } = useI18n()
 
 const show = ref(false)
-const checking = ref(false)
 const busy = ref(false)
 const sourceKind = ref<'file' | 'url'>('file')
 const picker = ref<HTMLInputElement | null>(null)
@@ -357,7 +356,6 @@ function close() {
   revision++
   show.value = false
   busy.value = false
-  checking.value = false
   dragDepth.value = 0
   revokePreview()
   file.value = null
@@ -393,32 +391,6 @@ onBeforeUnmount(() => {
 watch(() => session.state, close, { flush: 'sync' })
 watch(source, () => { error.value = '' })
 
-async function configuredModel(at: number) {
-  await models.initialize()
-  if (at !== revision) return ''
-  const key = models.effectiveVideoUnderstandingModel.value
-  if (!key) {
-    if (!show.value) close()
-    toast.error(t('functionModel.noVideoUnderstandingModel'))
-    openModels('function')
-    return ''
-  }
-  return key
-}
-
-async function open() {
-  if (checking.value || show.value) return
-  const at = revision
-  checking.value = true
-  try {
-    if (await configuredModel(at)) show.value = true
-  } catch (cause) {
-    if (at === revision) toast.error(getI18nErrorMessage(cause))
-  } finally {
-    if (at === revision) checking.value = false
-  }
-}
-
 async function apply(prompt: string) {
   session.state.originalPrompt = prompt
   close()
@@ -445,8 +417,14 @@ async function generate() {
   busy.value = true
   error.value = ''
   try {
-    const key = await configuredModel(at)
-    if (!key) return
+    await models.initialize()
+    if (at !== revision) return
+    const key = models.effectiveVideoUnderstandingModel.value
+    if (!key) {
+      toast.info(t('functionModel.noVideoUnderstandingModel'))
+      openModels('function')
+      return
+    }
     const [template, video] = await Promise.all([
       app.templateManager.getTemplate('video-prompt-from-reference'),
       typeof selected === 'string' ? { kind: 'url' as const, url: selected } : readReferenceVideo(selected),

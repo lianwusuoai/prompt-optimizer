@@ -38,6 +38,7 @@ import type { ImageInputRef } from '@prompt-optimizer/core'
 import { useImageInputPreparation } from '../../composables/image/useImageInputPreparation'
 import type { ReferenceActionKind } from '../../composables/image/useReferenceImageActions'
 import { useFunctionModelManager } from '../../composables/model/useFunctionModelManager'
+import { useToast } from '../../composables/ui/useToast'
 import { resolveReferencePromptPreview, type ReferencePromptPreview } from '../../services/ImageStyleExtractor'
 import { getI18nErrorMessage } from '../../utils/error'
 import type { AppServices } from '../../types/services'
@@ -53,6 +54,7 @@ const emit = defineEmits<{
   apply: [preview: ReferencePromptPreview, imageSrc: string]
 }>()
 const { t } = useI18n()
+const toast = useToast()
 const services = inject<Ref<AppServices | null>>('services', ref(null))
 const models = useFunctionModelManager(services)
 const { prepareInputRefs } = useImageInputPreparation()
@@ -111,7 +113,7 @@ async function generate() {
     const config = key ? await services.value?.modelManager?.getModel(key) : null
     if (!active) return
     if (!config) {
-      error.value = t('functionModel.noImageRecognitionModel')
+      toast.info(t('functionModel.noImageRecognitionModel'))
       emit('configure')
       return
     }

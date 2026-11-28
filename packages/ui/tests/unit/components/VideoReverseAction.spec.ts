@@ -116,6 +116,28 @@ describe('VideoReverseAction', () => {
     return { wrapper, session, sendVideoUnderstanding, openModels }
   }
 
+  it('ignores a missing-model check from a dismissed picker and prompts once on the next opening', async () => {
+    effectiveModel.value = ''
+    let finishCheck!: () => void
+    initModelsMock.mockImplementationOnce(() => new Promise<void>(resolve => { finishCheck = resolve }))
+    const { wrapper, openModels } = mountComponent()
+    const trigger = wrapper.get('[data-testid="video-reverse-open"]')
+    await trigger.trigger('click')
+    await wrapper.get('[data-testid="video-reverse-cancel"]').trigger('click')
+    finishCheck()
+    await flushPromises()
+    expect(openModels).not.toHaveBeenCalled()
+
+    await trigger.trigger('click')
+    await flushPromises()
+    expect(openModels).toHaveBeenCalledWith('function')
+    window.dispatchEvent(new Event('video-workspace-refresh-models'))
+    await flushPromises()
+    expect(openModels).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="video-reverse-choose"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('filters to video/*, accepts drag-and-drop video upload, shows preview/remove, and rejects non-video drops', async () => {
     const { wrapper } = mountComponent()
 

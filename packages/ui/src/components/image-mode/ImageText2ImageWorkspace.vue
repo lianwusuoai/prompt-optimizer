@@ -60,7 +60,7 @@
                                 :description="t(button.tooltipKey)"
                                 :data-testid="`reference-action-${button.kind}-button`"
                                 :loading="button.loading"
-                                :disabled="button.disabled || checkingReferenceModel"
+                                :disabled="button.disabled"
                                 @click="triggerReferenceAction(button.kind)"
                             >
                                 <template #icon><UiCamera /></template>
@@ -138,7 +138,7 @@
                                     :description="t(button.tooltipKey)"
                                     :data-testid="`reference-action-${button.kind}-button`"
                                     :loading="button.loading"
-                                    :disabled="button.disabled || checkingReferenceModel"
+                                    :disabled="button.disabled"
                                     @click="triggerReferenceAction(button.kind)"
                                 >
                                     <template #icon><UiCamera /></template>
@@ -983,7 +983,6 @@ const isAnalyzing = ref(false)
 const isIterating = ref(false)
 const isExtractingFromImage = ref(false)
 const showReferenceDialog = ref(false)
-const checkingReferenceModel = ref(false)
 
 // 历史管理专用 ref（不写入 session store）
 const currentChainId = ref('')
@@ -2001,30 +2000,16 @@ const referenceActionStatusLabelKey = computed(() => {
 })
 
 const closeReferenceDialog = () => {
-    checkingReferenceModel.value = false
     showReferenceDialog.value = false
     isExtractingFromImage.value = false
 }
 
-const triggerReferenceAction = async (actionKind: ReferenceActionKind) => {
-    if (checkingReferenceModel.value || showReferenceDialog.value || isOptimizing.value) return
+const triggerReferenceAction = (actionKind: ReferenceActionKind) => {
+    if (showReferenceDialog.value || isOptimizing.value) return
     if (actionKind === 'style-learn' && !referenceAction.canTriggerStyleLearning) return
 
-    checkingReferenceModel.value = true
-    try {
-        await functionModelManager.initialize()
-        if (!checkingReferenceModel.value) return
-        if (!effectiveImageRecognitionModelKey.value) {
-            promptConfigureImageRecognitionModel()
-            return
-        }
-        referenceAction.requestAction(actionKind)
-        showReferenceDialog.value = true
-    } catch (cause) {
-        if (checkingReferenceModel.value) toast.error(getI18nErrorMessage(cause))
-    } finally {
-        checkingReferenceModel.value = false
-    }
+    referenceAction.requestAction(actionKind)
+    showReferenceDialog.value = true
 }
 
 const applyReferenceResult = (preview: ReferencePromptPreview, imageSrc: string) => {
