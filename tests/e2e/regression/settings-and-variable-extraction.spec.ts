@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { addTextConnectionFixture } from '../helpers/text-connection-fixture'
 
 test.use({ actionTimeout: 10000 })
 test.describe.configure({ timeout: 90000 })
@@ -80,20 +81,14 @@ for (const compact of [true, false]) {
     test('extract button opens selectable results, cancel is safe, and confirmed variables survive reload', async ({ page }, testInfo) => {
       await page.goto('/#/pro/variable')
       await expect(page.locator('[data-mode="pro-variable"]')).toBeVisible()
-      const modelKey = await page.evaluate(async () => {
-        const workspace = document.querySelector('[data-testid="workspace"]') as any
-        const services = workspace.__vueParentComponent.provides.services.value
-        const models = await services.modelManager.getAllModels()
-        const model = models.find((entry: any) => entry.providerMeta.id === 'openai') || models[0]
-        if (!model) throw new Error('Missing built-in model fixture')
-        await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
+      const modelKey = await addTextConnectionFixture(page)
+      await page.evaluate(async modelKey => {
         const session = (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('proVariableSession')
         session.updatePrompt('Plan a trip to Paris for three days.')
-        session.updateOptimizeModel(model.id)
+        session.updateOptimizeModel(modelKey)
         session.setTemporaryVariable('existing', 'preserved')
         await session.saveSession()
-        return model.id
-      })
+      }, modelKey)
       await page.reload()
       await expect(page.locator('[data-mode="pro-variable"]')).toBeVisible()
       // Only model output is deterministic; button wiring, dialog, session writes and persistence are real.

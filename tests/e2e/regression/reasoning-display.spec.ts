@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { addTextConnectionFixture } from '../helpers/text-connection-fixture'
 
 const firstThought = '先分析图形的结构与比例。'.repeat(24)
 const secondThought = '再计算车架和车轮的位置。'
@@ -11,14 +12,12 @@ for (const scenario of [
     await context.addInitScript(name => { (window as any).__TEST_DB_NAME__ = name }, `reasoning-${scenario.route}-${Date.now()}`)
     await page.goto(`/#/${scenario.route}`)
     await expect(page.getByTestId(scenario.run)).toBeVisible({ timeout: 25000 })
-    await page.evaluate(async ({ scenario, firstThought, secondThought }) => {
+    const modelKey = await addTextConnectionFixture(page)
+    await page.evaluate(async ({ scenario, firstThought, secondThought, modelKey }) => {
       const app = (document.querySelector('#app') as any).__vue_app__
       const session = app.config.globalProperties.$pinia._s.get(scenario.store)
       const root = document.querySelector('[data-testid="arena-workspace"], [data-testid="workspace"]') as any
       const services = root.__vueParentComponent.provides.services.value
-      const model = (await services.modelManager.getAllModels())[0]
-      await services.modelManager.updateModel(model.id, { enabled: true,
-        connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
       let continueReasoning!: () => void
       let complete!: () => void
       const nextReasoning = new Promise<void>(resolve => { continueReasoning = resolve })
@@ -36,6 +35,7 @@ for (const scenario of [
         })
       }
       if (scenario.route === 'arena') {
+        const model = await services.modelManager.getModel(modelKey)
         await session.refreshConfigs()
         session.state.prompt = '绘制一个简单的自行车图形。'
         session.state.contestants.forEach((column: any) => {
@@ -47,10 +47,10 @@ for (const scenario of [
         session.testContent = '绘制图形'
         session.optimizedPrompt = '绘制图形'
         session.setTestColumnCount(2)
-        session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey: model.id, version: 0 }))
+        session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey, version: 0 }))
         services.promptService.testPromptStream = async (_system: string, _user: string, _model: string, callbacks: any) => produce(callbacks)
       }
-    }, { scenario, firstThought, secondThought })
+    }, { scenario, firstThought, secondThought, modelKey })
 
     await page.getByTestId(scenario.run).click()
     const output = scenario.route === 'arena'

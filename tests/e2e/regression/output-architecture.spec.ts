@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/native-output-browser'
+import { addTextConnectionFixture } from '../helpers/text-connection-fixture'
 
 test.describe.configure({ timeout: 90000 })
 // Native visibility acceptance must run without continuous screen capture.
@@ -26,15 +27,14 @@ test('optimization streams through the same document and commits complete histor
   await page.goto(new URL('/#/basic/user', test.info().project.use.baseURL).toString())
   await expect(page.getByTestId('workspace')).toBeVisible({ timeout: 25000 })
   const source = '```html\n<!doctype html><html><body>' + '<p>literal $& $`</p>\r\n'.repeat(300) + '</body></html>\n```'
-  await page.evaluate(async source => {
+  const modelKey = await addTextConnectionFixture(page)
+  await page.evaluate(async ({ source, modelKey }) => {
     const app = (document.querySelector('#app') as any).__vue_app__
     const session = app.config.globalProperties.$pinia._s.get('basicUserSession')
     const services = (document.querySelector('[data-testid="workspace"]') as any).__vueParentComponent.provides.services.value
-    const model = (await services.modelManager.getAllModels())[0]
-    await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
     session.prompt = 'Generate a web page'
     await new Promise(resolve => setTimeout(resolve, 20))
-    session.selectedOptimizeModelKey = model.id
+    session.selectedOptimizeModelKey = modelKey
     session.selectedTemplateId = 'user-prompt-basic'
     services.promptService.optimizePromptStream = async (_request: unknown, callbacks: any) => {
       callbacks.onReasoningToken('literal reasoning')
@@ -43,7 +43,7 @@ test('optimization streams through the same document and commits complete histor
       callbacks.onToken(source.slice(3000))
       await callbacks.onComplete()
     }
-  }, source)
+  }, { source, modelKey })
   await page.getByTestId('basic-user-optimize-button').click()
   const output = page.getByTestId('basic-user-output')
   await expect(output.getByTestId('output-stop')).toBeVisible()
@@ -69,19 +69,18 @@ test('stops only the selected concurrent request and persists capacity/failure o
   await context.addInitScript(name => { (window as any).__TEST_DB_NAME__ = name }, `output-terminal-${Date.now()}`)
   await page.goto(new URL('/#/basic/user', test.info().project.use.baseURL).toString())
   await expect(page.getByTestId('workspace')).toBeVisible({ timeout: 25000 })
-  await page.evaluate(async () => {
+  const modelKey = await addTextConnectionFixture(page)
+  await page.evaluate(async modelKey => {
     const state = window as any
     const pinia = (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia
     const session = pinia._s.get('basicUserSession')
     const services = (document.querySelector('[data-testid="workspace"]') as any).__vueParentComponent.provides.services.value
-    const model = (await services.modelManager.getAllModels())[0]
-    await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
     session.prompt = 'Generate output'
     session.testContent = 'Generate output'
     await new Promise(resolve => setTimeout(resolve, 20))
     session.optimizedPrompt = 'Generate output'
     session.setTestColumnCount(2)
-    session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey: model.id, version: 0 }))
+    session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey, version: 0 }))
     session.testVariantResults = { a: { result: '', reasoning: '' }, b: { result: '', reasoning: '' } }
     state.__terminalActive = 0
     state.__terminalAborted = 0
@@ -97,7 +96,7 @@ test('stops only the selected concurrent request and persists capacity/failure o
         await new Promise((_resolve, reject) => callbacks.signal.addEventListener('abort', () => reject(callbacks.signal.reason), { once: true }))
       } finally { state.__terminalActive-- }
     }
-  })
+  }, modelKey)
   const run = page.getByTestId('basic-user-test-run-all')
   const original = page.getByTestId('basic-user-test-original-output')
   const optimized = page.getByTestId('basic-user-test-optimized-output')
@@ -147,13 +146,12 @@ for (const scenario of cases) {
       await page.bringToFront()
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('visible')
     }
-    await page.evaluate(async ({ scenario, sources }) => {
+    const modelKey = await addTextConnectionFixture(page)
+    await page.evaluate(async ({ scenario, sources, modelKey }) => {
       const app = (document.querySelector('#app') as any).__vue_app__
       const pinia = app.config.globalProperties.$pinia
       const session = pinia._s.get(scenario.store)
       const services = (document.querySelector('[data-testid="workspace"]') as any).__vueParentComponent.provides.services.value
-      const model = (await services.modelManager.getAllModels())[0]
-      await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
       if (scenario.mode === 'pro-multi') {
         session.conversationMessagesSnapshot = [{ id: 'system', role: 'system', content: 'Generate the requested output' }, { id: 'user', role: 'user', content: 'Draw an SVG page' }]
         session.selectedMessageId = 'user'
@@ -162,7 +160,7 @@ for (const scenario of cases) {
       await new Promise(resolve => setTimeout(resolve, 20))
       session.optimizedPrompt = 'Draw a complete SVG page'
       session.setTestColumnCount(scenario.columns)
-      session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey: model.id }))
+      session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey }))
       const state = window as any
       Object.assign(state, { __outputActive: 0, __outputPeak: 0, __outputHeld: 0, __outputCalls: 0, __outputFinished: 0, __stateUpdates: 0, __receivedLengths: [], __maxSourceNodes: 0 })
       session.$subscribe(() => { state.__stateUpdates++ })
@@ -193,7 +191,7 @@ for (const scenario of cases) {
       }
       services.promptService.testPromptStream = async (_system: string, _user: string, _model: string, callbacks: any) => produce(callbacks)
       services.promptService.testCustomConversationStream = async (_request: unknown, callbacks: any) => produce(callbacks)
-    }, { scenario, sources })
+    }, { scenario, sources, modelKey })
     const cdp = await context.newCDPSession(page)
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
     await page.getByTestId(`${scenario.mode}-test-run-all`).click()

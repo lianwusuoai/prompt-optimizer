@@ -16,23 +16,25 @@ const select = async (page: Page, testId: string, label: string | RegExp) => {
 test.describe('video model labels', () => {
   test.use({ locale: 'zh-CN' })
 
-  test('keeps localized connection names and concrete preset names in both selector levels', async ({ page }) => {
+  test('distinguishes saved connection names, localized provider labels and model names', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.route('**/config.js', route => route.fulfill({
       contentType: 'application/javascript', body: 'window.runtime_config={SEEDANCE_API_KEY:"fixture-ark"};',
     }))
     await page.goto('/#/video/create')
     const arkLabel = '火山方舟（中国站）'
+    const defaultConnection = 'Volcengine Ark'
     const pickerA = page.getByTestId('video-model-a')
     const pickerB = page.getByTestId('video-model-b')
-    await expect(pickerB).toHaveAttribute('title', `${arkLabel} · Seedance 2.0 Fast`)
+    await expect(pickerB).toBeVisible({ timeout: 20000 })
+    await expect(pickerB).toHaveAttribute('title', `Seedance 2.0 Fast · ${defaultConnection}`)
     await pickerB.click()
-    const defaultGroup = page.getByRole('region', { name: arkLabel, exact: true })
+    const defaultGroup = page.getByRole('region', { name: defaultConnection, exact: true })
     await expect(defaultGroup.getByRole('button', { name: 'Seedance 2.0 Fast', exact: true })).toBeVisible()
     await defaultGroup.getByRole('button', { name: 'Seedance 2.5', exact: true }).click()
-    await expect(pickerB).toHaveAttribute('title', `${arkLabel} · Seedance 2.5`)
+    await expect(pickerB).toHaveAttribute('title', `Seedance 2.5 · ${defaultConnection}`)
 
-    await page.getByRole('button', { name: /Model Manager|模型管理/i }).click()
+    await page.getByRole('button', { name: /^(Model Connections|模型连接|模型連線)$/i }).click()
     await page.getByTestId('add-video-model').click()
     const name = page.getByTestId('video-config-name').locator('input')
     await expect(name).toHaveValue(arkLabel)
@@ -63,13 +65,13 @@ test.describe('video model labels', () => {
     await expect(studioGroup).toBeVisible()
     await search.fill('doubao-seedance-2-0-fast-260128')
     await studioGroup.getByRole('button', { name: 'Seedance 2.0 Fast', exact: true }).click()
-    await expect(pickerB).toHaveAttribute('title', 'Studio Ark · Seedance 2.0 Fast')
+    await expect(pickerB).toHaveAttribute('title', 'Seedance 2.0 Fast · Studio Ark')
     await pickerB.click()
     await expect(menu.getByRole('region').first()).toHaveAttribute('aria-label', 'Studio Ark')
     await studioGroup.getByRole('button', { name: 'Seedance 2.5', exact: true }).click()
-    await expect(pickerB).toHaveAttribute('title', 'Studio Ark · Seedance 2.5')
+    await expect(pickerB).toHaveAttribute('title', 'Seedance 2.5 · Studio Ark')
     await pickerA.click()
-    await expect(menu.getByRole('region').first()).toHaveAttribute('aria-label', arkLabel)
+    await expect(menu.getByRole('region').first()).toHaveAttribute('aria-label', defaultConnection)
   })
 })
 
@@ -98,7 +100,7 @@ test('mixes providers, splits and merges parameters, and preserves input modes a
   })
   await page.route('https://video-test.invalid/h3.mp4', route => route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(0) }))
   await page.goto('/#/video/create')
-  const manage = page.getByRole('button', { name: /Model Manager|模型管理/i })
+  const manage = page.getByRole('button', { name: /^(Model Connections|模型连接|模型連線)$/i })
   const manager = page.getByTestId('video-model-manager')
   await manage.click()
   const add = async (name: string, intl: boolean, model?: RegExp) => {
@@ -160,9 +162,9 @@ test('mixes providers, splits and merges parameters, and preserves input modes a
   await chooseB('INTL H3', 'MiniMax H3 Highspeed')
   await expect(picker).toContainText('MiniMax H3 Highspeed')
   await chooseB('CN Lite', 'MiniMax H3 Lite')
-  await expect(picker).toHaveAttribute('title', 'CN Lite · MiniMax H3 Lite')
+  await expect(picker).toHaveAttribute('title', 'MiniMax H3 Lite · CN Lite')
   await chooseB('INTL H3', 'MiniMax H3 Lite')
-  await expect(picker).toHaveAttribute('title', 'INTL H3 · MiniMax H3 Lite')
+  await expect(picker).toHaveAttribute('title', 'MiniMax H3 Lite · INTL H3')
   await select(page, 'video-param-b-resolution', '480p')
   await page.reload()
   await expect(picker).toContainText('MiniMax H3 Lite')

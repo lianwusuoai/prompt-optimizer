@@ -1,5 +1,6 @@
 import { chromium, test as base, expect, type Page, type BrowserContext, type Locator } from '@playwright/test'
 import { resolve } from 'node:path'
+import { addTextConnectionFixture } from '../e2e/helpers/text-connection-fixture'
 
 // Load the built extension in its own headless profile. A web-hosted copy cannot
 // reproduce extension CSP, manifest sandboxing or packaged-resource failures.
@@ -119,18 +120,17 @@ test('opens an interactive fullscreen preview in the same tab', async ({ extensi
 test('renders both concurrent long HTML outputs only after streaming completes', async ({ extensionPage: page }) => {
   await page.goto(page.url().replace('/basic/system', '/basic/user'))
   await expect(page.getByTestId('workspace')).toBeVisible()
+  const modelKey = await addTextConnectionFixture(page)
   const source = `# Result\n\n\`\`\`html\n<svg viewBox="0 0 100 100">${'<path d="M1 2 L3 4"/>'.repeat(2000)}</svg>\n\`\`\`\n\nDone.`
-  const stream = await page.evaluateHandle(async source => {
+  const stream = await page.evaluateHandle(({ source, modelKey }) => {
     // Production Vue omits the DOM debug pointer used by the dev-server tests.
     // Reach the actual provider through the entry shell's rendered component.
     const app = (document.querySelector('#app') as any).__vue_app__
     const session = app.config.globalProperties.$pinia._s.get('basicUserSession')
     const services = app._container._vnode.component.subTree.component.provides.services.value
-    const model = (await services.modelManager.getAllModels())[0]
-    await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
     session.prompt = 'Draw a page'
     session.optimizedPrompt = 'Draw a complete page'
-    session.testVariants = session.testVariants.map((v: any) => ({ ...v, modelKey: model.id }))
+    session.testVariants = session.testVariants.map((v: any) => ({ ...v, modelKey }))
     let complete!: () => void
     const completion = new Promise<void>(resolve => { complete = resolve })
     const stream = { started: 0, complete }
@@ -141,7 +141,7 @@ test('renders both concurrent long HTML outputs only after streaming completes',
       callbacks.onComplete()
     }
     return stream
-  }, source)
+  }, { source, modelKey })
   await page.getByTestId('basic-user-test-run-all').click()
   await expect.poll(() => stream.evaluate(state => state.started)).toBe(2)
   const outputs = [

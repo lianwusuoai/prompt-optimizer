@@ -1,4 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test'
+import { addTextConnectionFixture } from '../helpers/text-connection-fixture'
 
 test.use({ actionTimeout: 10000 })
 test.describe.configure({ timeout: 60000 })
@@ -36,17 +37,16 @@ for (const width of [1440, 390]) {
     }, `output-wrapping-${width}-${Date.now()}`)
     await page.goto('/#/basic/user')
     await expect(page.getByTestId('workspace')).toBeVisible({ timeout: 25000 })
-    await page.evaluate(async source => {
+    const modelKey = await addTextConnectionFixture(page)
+    await page.evaluate(async ({ source, modelKey }) => {
       const session = (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('basicUserSession')
       const services = (document.querySelector('[data-testid="workspace"]') as any).__vueParentComponent.provides.services.value
-      const model = (await services.modelManager.getAllModels())[0]
-      await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
       session.prompt = 'Generate readable long output'
       session.testContent = 'Generate readable long output'
       await new Promise(resolve => setTimeout(resolve, 20))
       session.optimizedPrompt = 'Generate readable long output'
       session.setTestColumnCount(2)
-      session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey: model.id, version: 0 }))
+      session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey, version: 0 }))
       const state = window as any
       state.__resumeWrapping = []
       services.promptService.testPromptStream = async (_system: string, _user: string, _model: string, callbacks: any) => {
@@ -55,7 +55,7 @@ for (const width of [1440, 390]) {
         callbacks.onToken(source.slice(2000))
         await callbacks.onComplete()
       }
-    }, source)
+    }, { source, modelKey })
     if (width < 768) await page.getByTestId('workspace-region-test').click()
     await page.getByTestId('basic-user-test-run-all').click()
     const output = page.getByTestId('basic-user-test-original-output')

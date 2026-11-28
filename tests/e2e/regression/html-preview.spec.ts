@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { addTextConnectionFixture } from '../helpers/text-connection-fixture'
 
 test.use({ actionTimeout: 10000 })
 test.describe.configure({ timeout: 60000 })
@@ -207,21 +208,20 @@ test('uses the same preview entry in the mobile view menu', async ({ page }) => 
 test('batches long fenced HTML while generating, keeps every token, and previews SVG afterward', async ({ page }) => {
   await page.goto('/#/basic/user')
   await expect(page.getByTestId('workspace')).toBeVisible()
+  const modelKey = await addTextConnectionFixture(page)
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
   const source = 'Here is the page:\n```html\n<!doctype html><html><body><h1>SVG flight</h1><svg id="flight" viewBox="0 0 100 100">'
     + '<path d="M1 2 L30 40 Q50 60 70 80 Z" fill="#df783c"/>\n'.repeat(400)
     + '</svg><button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button></body></html>\n```'
   const chunks = Math.ceil(source.length / 128)
-  await page.evaluate(async ({ source }) => {
+  await page.evaluate(({ source, modelKey }) => {
     const app = (document.querySelector('#app') as any).__vue_app__
     const session = app.config.globalProperties.$pinia._s.get('basicUserSession')
     const services = (document.querySelector('[data-testid="workspace"]') as any).__vueParentComponent.provides.services.value
-    const model = (await services.modelManager.getAllModels())[0]
-    await services.modelManager.updateModel(model.id, { enabled: true, connectionConfig: { ...model.connectionConfig, apiKey: 'fixture-no-network' } })
     session.prompt = 'Draw an SVG page'
     session.optimizedPrompt = 'Draw a complete SVG page'
-    session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey: model.id }))
+    session.testVariants = session.testVariants.map((variant: any) => ({ ...variant, modelKey }))
     const state = window as any
     state.__streamUpdates = 0
     state.__activeStreams = 0
@@ -253,7 +253,7 @@ test('batches long fenced HTML while generating, keeps every token, and previews
       callbacks.onComplete()
       state.__activeStreams--
     }
-  }, { source })
+  }, { source, modelKey })
   await page.getByTestId('basic-user-test-run-all').click()
   const output = page.getByTestId('basic-user-test-original-output')
   await expect(output.getByTestId('output-source-view')).toBeVisible()
