@@ -41,9 +41,9 @@ const PROVIDER_REQUIRED_CONNECTION_FIELDS: Record<string, string[]> = {
   cloudflare: ['apiKey', 'accountId']
 };
 
-function getFirstEnvValue(envKeys: readonly string[]): string {
+function getFirstEnvValue(envKeys: readonly string[], readEnv: typeof getEnvVar): string {
   for (const envKey of envKeys) {
-    const value = getEnvVar(envKey).trim();
+    const value = readEnv(envKey).trim();
     if (value) return value;
   }
   return '';
@@ -78,7 +78,7 @@ export function getBuiltinModelIds(): string[] {
  *
  * @param registry 可选，文本适配器注册表（用于依赖注入和测试）
  */
-export function getDefaultTextModels(registry?: ITextAdapterRegistry): Record<string, TextModelConfig> {
+export function getDefaultTextModels(registry?: ITextAdapterRegistry, readEnv = getEnvVar): Record<string, TextModelConfig> {
   const adapterRegistry = registry || new TextAdapterRegistry();
   const result: Record<string, TextModelConfig> = {};
 
@@ -88,7 +88,7 @@ export function getDefaultTextModels(registry?: ITextAdapterRegistry): Record<st
     const provider = adapter.getProvider();
     const models = adapter.getModels();
     const defaultModel = models[0] || adapter.buildDefaultModel(providerId);
-    const apiKey = getFirstEnvValue(envKeys);
+    const apiKey = getFirstEnvValue(envKeys, readEnv);
     const connectionConfig: Record<string, unknown> = {
       apiKey,
       baseURL: provider.defaultBaseURL
@@ -96,7 +96,7 @@ export function getDefaultTextModels(registry?: ITextAdapterRegistry): Record<st
 
     const extraConnectionFields = PROVIDER_EXTRA_CONNECTION_ENV_KEYS[providerId] || {};
     for (const [field, fieldEnvKeys] of Object.entries(extraConnectionFields)) {
-      const envValue = getFirstEnvValue(fieldEnvKeys);
+      const envValue = getFirstEnvValue(fieldEnvKeys, readEnv);
       if (field === 'baseURL' && !envValue) {
         continue;
       }
@@ -124,11 +124,11 @@ export function getDefaultTextModels(registry?: ITextAdapterRegistry): Record<st
 
   // Custom 单独处理（baseURL 和 model 来自环境变量）
   const openaiCompatibleAdapter = adapterRegistry.getAdapter('openai-compatible');
-  const customApiKey = getEnvVar('VITE_CUSTOM_API_KEY').trim();
-  const customBaseURL = getEnvVar('VITE_CUSTOM_API_BASE_URL').trim();
-  const rawCustomModelId = getEnvVar('VITE_CUSTOM_API_MODEL').trim();
+  const customApiKey = readEnv('VITE_CUSTOM_API_KEY').trim();
+  const customBaseURL = readEnv('VITE_CUSTOM_API_BASE_URL').trim();
+  const rawCustomModelId = readEnv('VITE_CUSTOM_API_MODEL').trim();
   const customModelId = rawCustomModelId || 'custom-model';
-  const rawCustomHeaders = getEnvVar('VITE_CUSTOM_API_HEADERS');
+  const rawCustomHeaders = readEnv('VITE_CUSTOM_API_HEADERS');
   const hasExplicitCustomConfig = [
     customApiKey,
     customBaseURL,

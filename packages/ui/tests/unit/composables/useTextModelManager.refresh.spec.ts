@@ -375,6 +375,11 @@ describe('Chrome discovery draft reuses the built-in connection', () => {
   it('saves into the existing placeholder only after explicit submission', async () => {
     vi.stubGlobal('LanguageModel', { availability: vi.fn().mockResolvedValue('available') })
     const { manager, modelManager, storage } = await setup()
+    const adapter = registry.getAdapter(service.kind)
+    await modelManager.addModel(service.kind, {
+      id: service.kind, name: 'Chrome AI', enabled: false, providerMeta: adapter.getProvider(),
+      modelMeta: adapter.getModels()[0], connectionConfig: {},
+    }, true)
     const before = await storage.getItem(CORE_SERVICE_KEYS.MODELS)
     expect(await manager.prepareForLocalService(service)).toBe(true)
     expect(manager.form.value).toMatchObject({ originalId: 'chrome-built-in', providerId: 'chrome-built-in', enabled: true, connectionConfig: {} })

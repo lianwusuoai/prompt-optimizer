@@ -373,6 +373,11 @@ export class FileStorageProvider implements IStorageProvider {
     return this.data.get(key) || null;
   }
   
+  async getEntriesByPrefix(prefix: string): Promise<Array<[string, string]>> {
+    await this.ensureInitialized();
+    return Array.from(this.data).filter(([key]) => key.startsWith(prefix));
+  }
+
   async setItem(key: string, value: string): Promise<void> {
     await this.ensureInitialized();
     if (this.data.get(key) === value && this.revision === this.savedRevision) return;

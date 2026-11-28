@@ -42,8 +42,9 @@
           <NH4 v-if="!isCompact" style="margin: 0 0 12px 0; font-size: 14px;">{{ t('modelManager.provider.section') }}</NH4>
 
           <NFormItem :label="t('modelManager.provider.label')">
+            <slot v-if="isSubscription" name="subscription-provider">{{ t('chatgptSubscription.title') }}</slot>
             <NSelect
-              v-if="isCompact"
+              v-else-if="isCompact"
               :ref="providerMenu.selectRef"
               v-bind="providerMenu.attrs.value"
               data-testid="text-model-provider-select"
@@ -57,7 +58,7 @@
             />
             <ProviderPillSelect
               v-else
-              v-model:value="form.providerId"
+              :value="form.providerId"
               :options="providerOptions"
               :loading="isLoadingProviders"
               :aria-label="t('modelManager.provider.label')"
@@ -248,7 +249,7 @@
           <NDivider v-if="!isCompact" style="margin: 12px 0 8px 0;" />
           <NH4 v-if="!isCompact" style="margin: 0 0 12px 0; font-size: 14px;">{{ t('modelManager.model.section') }}</NH4>
 
-          <NFormItem :label="t('modelManager.selectModel')">
+          <NFormItem :label="t('modelManager.defaultModel')">
             <component :is="isCompact ? 'div' : NSpace" align="center" style="width: 100%;" :class="{ 'mobile-text-model-picker': isCompact }">
               <ModelIdSelector
                 data-testid="text-model-id-select"
@@ -258,11 +259,13 @@
                 :loading="isLoadingModelOptions"
                 :placeholder="t('modelManager.defaultModelPlaceholder')"
                 :style="isCompact ? { minWidth: 0, flex: 1 } : { flex: 1, minWidth: '300px', maxWidth: '500px' }"
-                clearable
+                :allow-custom="!isSubscription"
+                :clearable="!isSubscription"
                 @update:value="handleModelChange"
               />
 
               <ThemedTooltip
+                v-if="!isSubscription"
                 :label="t('modelManager.clickToFetchModels')"
                 :disabled="!canRefreshModelOptions"
                 :show-arrow="false"
@@ -287,8 +290,10 @@
           </NFormItem>
         </NForm>
 
-        <NDivider v-if="!isCompact" style="margin: 12px 0 8px 0;" />
+        <NDivider v-if="!isCompact && (!isSubscription || currentParameterDefinitions.length)" style="margin: 12px 0 8px 0;" />
         <ModelAdvancedSection
+          v-if="!isSubscription || currentParameterDefinitions.length"
+          :allow-custom="!isSubscription"
           mode="text"
           :provider-type="currentProviderType"
           :parameter-definitions="currentParameterDefinitions"
@@ -369,7 +374,7 @@ import { useConfirmDialog } from '../composables/ui/useConfirmDialog'
 
 import { useI18n } from 'vue-i18n'
 import { useToast } from '../composables/ui/useToast'
-import { isRunningInElectron, validateCustomRequestHeaders, type CustomRequestHeaderInput } from '@prompt-optimizer/core'
+import { CHATGPT_SUBSCRIPTION_PROVIDER, isRunningInElectron, validateCustomRequestHeaders, type CustomRequestHeaderInput } from '@prompt-optimizer/core'
 import {
 
   NForm,
@@ -408,7 +413,7 @@ const { show } = defineProps({
   }
 })
 
-const emit = defineEmits(['update:show', 'saved'])
+const emit = defineEmits(['update:show', 'saved', 'subscription'])
 
 const { t } = useI18n()
 const { isCompact } = useWorkspaceLayout()
@@ -435,7 +440,9 @@ watch([() => show, formReady], async ([visible, ready]) => {
   await nextTick()
   initialForm.value = JSON.stringify(form.value)
 }, { immediate: true })
-const providerOptions = manager.providerOptions
+const providerOptions = computed(() => !isEditing.value && window.electronAPI?.chatgptSubscription
+  ? [{ label: t('chatgptSubscription.title'), value: CHATGPT_SUBSCRIPTION_PROVIDER, disabled: false }, ...manager.providerOptions.value]
+  : manager.providerOptions.value)
 const isLoadingProviders = manager.isLoadingProviders
 const connectionFields = manager.connectionFields
 const modelOptions = manager.modelOptions
@@ -446,6 +453,7 @@ const currentParameterDefinitions = manager.currentParameterDefinitions
 const updateParamOverrides = manager.updateParamOverrides
 const onModelChange = manager.onModelChange
 const currentProviderType = manager.currentProviderType
+const isSubscription = computed(() => currentProviderType.value === CHATGPT_SUBSCRIPTION_PROVIDER)
 const formConnectionStatus = manager.formConnectionStatus
 const testFormConnection = manager.testFormConnection
 const isTestingFormConnection = manager.isTestingFormConnection
@@ -726,6 +734,10 @@ const handleModelChange = (modelId: string) => {
 }
 
 const onProviderChange = (providerId: string) => {
+  if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER) {
+    emit('subscription')
+    return
+  }
   // 切换提供商时总是自动选择第一个模型
   // 因为原来的模型ID在新提供商下可能不存在
   manager.selectProvider(providerId, {

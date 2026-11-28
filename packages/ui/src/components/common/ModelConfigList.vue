@@ -1,5 +1,6 @@
 <template>
-  <div v-if="isCompact" class="mobile-text-model-list" :data-testid="`mobile-${kind}-model-list`">
+  <NEmpty v-if="!models.length" :description="t('modelManager.noConnections')" />
+  <div v-else-if="isCompact" class="mobile-text-model-list" :data-testid="`mobile-${kind}-model-list`">
     <NInput
       v-model:value="search"
       :placeholder="t('common.search')"
@@ -12,7 +13,7 @@
       :key="model.id"
       :data-testid="`${kind}-model-row-${model.id}`"
       :title="model.name"
-      :subtitle="[model.provider, model.model].filter(Boolean).join(' · ')"
+      :subtitle="[model.provider !== model.name ? model.provider : '', t('modelManager.defaultModelValue', { model: model.model })].filter(Boolean).join(' · ')"
       :enabled="model.enabled"
       :testing="isTestingConnectionFor(model.id)"
       :test-label="t('common.test')" :test-hint="testHint"
@@ -48,11 +49,11 @@
             </NSpace>
 
             <NSpace :size="6" class="model-card-tags">
-              <NTag size="small" type="default" round :bordered="false">
+              <NTag v-if="model.provider !== model.name" size="small" type="default" round :bordered="false">
                 {{ model.provider }}
               </NTag>
               <NTag size="small" type="info" round :bordered="false">
-                {{ model.model }}
+                {{ t('modelManager.defaultModelValue', { model: model.model }) }}
               </NTag>
               <NTag v-for="tag in model.tags" :key="tag.label" :type="tag.type" size="small" round :bordered="false">
                 {{ tag.label }}
@@ -80,17 +81,18 @@
 
           <NButton
             @click="emit('edit', model.id)"
-            :aria-label="t('modelManager.editModel')"
+            :aria-label="t('common.edit')"
             size="small"
             quaternary
           >
             <template #icon>
               <UiSquarePen />
             </template>
-            <span class="hidden md:inline">{{ t('modelManager.editModel') }}</span>
+            <span class="hidden md:inline">{{ t('common.edit') }}</span>
           </NButton>
 
           <NButton
+            v-if="model.clonable !== false"
             @click="emit('clone', model.id)"
             :aria-label="t('modelManager.cloneModel')"
             size="small"
@@ -144,6 +146,7 @@ export interface ModelConfigListItem {
   modelId?: string
   enabled: boolean
   deletable: boolean
+  clonable?: boolean
   tags: { label: string; type: 'default' | 'success' | 'info' | 'warning' | 'error' }[]
 }
 </script>
@@ -167,12 +170,12 @@ const filteredModels = computed(() => {
     .some(value => value?.toLocaleLowerCase().includes(query)))
 })
 const mobileActions = (model: ModelConfigListItem): DropdownOption[] => [
-  { label: t('modelManager.cloneModel'), key: 'clone' },
+  ...(model.clonable !== false ? [{ label: t('modelManager.cloneModel'), key: 'clone' }] : []),
   { label: t(model.enabled ? 'common.disable' : 'common.enable'), key: model.enabled ? 'disable' : 'enable' },
   ...(model.deletable ? [{ label: t('common.delete'), key: 'delete' }] : []),
 ]
 const handleMobileAction = (action: string, model: ModelConfigListItem) => {
-  if (action === 'clone' || action === 'enable' || action === 'disable' || (action === 'delete' && model.deletable)) {
+  if ((action === 'clone' && model.clonable !== false) || action === 'enable' || action === 'disable' || (action === 'delete' && model.deletable)) {
     emit(action, model.id)
   }
 }

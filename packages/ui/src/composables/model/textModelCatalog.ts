@@ -47,7 +47,7 @@ export function rankModelOptions(models: ModelOption[], current: string, recent:
 export async function loadTextModelCatalog(services: AppServices, config: TextModelConfig, force = false): Promise<void> {
   const state = getTextModelCatalog(services)
   // Kept in memory only; a changed endpoint/key invalidates this connection's list.
-  const signature = JSON.stringify([config.providerId, config.providerMeta.id, config.connectionConfig])
+  const signature = JSON.stringify([config.providerId, config.providerMeta.id, config.connectionConfig, config.availableModels])
   const previous = state.entries[config.id]
   if (!force && state.signatures.get(config.id) === signature) {
     if (state.pending.has(config.id)) return state.pending.get(config.id)
@@ -72,7 +72,9 @@ export async function loadTextModelCatalog(services: AppServices, config: TextMo
         const saved = await services.preferenceService?.get<unknown>(recentKey + config.id, []).catch(() => [])
         if (!(config.id in state.recent)) state.recent[config.id] = Array.isArray(saved) ? saved.filter(id => typeof id === 'string').slice(0, 12) : []
       }
-      if (config.providerMeta.supportsDynamicModels) {
+      if (config.availableModels) {
+        entry.models = config.availableModels.map(model => ({ value: model.id, label: model.name }))
+      } else if (config.providerMeta.supportsDynamicModels) {
         const models = await services.llmService.fetchModelList(config.providerMeta.id, config)
         if (models.length) {
           const labels = new Map(entry.models.map(model => [model.value, model.label]))

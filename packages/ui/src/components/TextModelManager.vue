@@ -1,11 +1,14 @@
 <template>
   <div class="text-model-manager">
+    <ChatGPTSubscriptionConnection ref="subscription" :active="active" :has-connection="!!subscriptionModel" @updated="refreshSubscriptionModels"
+      @availability="onSubscriptionAvailability" />
     <LocalServiceDiscovery :active="active && modelsReady" :models="manager.models.value"
       :disabled="preparingLocalService || showEditModal" @select="handleLocalService" />
     <TextModelList
       :models="visibleModels"
+      :subscription-email="subscription?.account?.state.email"
       :is-testing-connection-for="isTestingConnectionFor"
-      :is-default-model="manager.isDefaultModel"
+      v-if="visibleModels.length || !hasSubscription"
       @test="handleTestConnection"
       @edit="handleEditModel"
       @clone="handleCloneModel"
@@ -18,7 +21,12 @@
       :show="showEditModal"
       @update:show="updateEditModalVisibility"
       @saved="handleModelUpdated"
-    />
+      @subscription="openSubscription"
+    >
+      <template #subscription-provider>
+        <ChatGPTSubscriptionAccount v-if="subscription?.account" v-bind="subscription.account" @action="subscription.onAccountAction" />
+      </template>
+    </TextModelEditModal>
   </div>
 </template>
 
@@ -26,8 +34,10 @@
 import { onMounted, onBeforeUnmount, provide, ref, h, watch, computed } from 'vue'
 
 import { useI18n } from 'vue-i18n'
-import { isRunningInElectron } from '@prompt-optimizer/core'
+import { CHATGPT_SUBSCRIPTION_PROVIDER, isRunningInElectron } from '@prompt-optimizer/core'
 import LocalServiceDiscovery from './LocalServiceDiscovery.vue'
+import ChatGPTSubscriptionConnection from './ChatGPTSubscriptionConnection.vue'
+import ChatGPTSubscriptionAccount from './ChatGPTSubscriptionAccount.vue'
 import { isChromeBuiltInPlaceholder, type DiscoveredLocalService } from '../utils/local-model-discovery'
 import { useTextModelManager } from '../composables/model/useTextModelManager'
 import TextModelList from './TextModelList.vue'
@@ -37,7 +47,7 @@ import { useToast } from '../composables/ui/useToast'
 import { useConfirmDialog } from '../composables/ui/useConfirmDialog'
 import { getProviderDisplayName } from '../utils/provider-display'
 
-const emit = defineEmits(['modelsUpdated'])
+const emit = defineEmits(['modelsUpdated', 'subscriptionAvailability'])
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: false })
 const { t } = useI18n()
 const toast = useToast()
@@ -45,7 +55,20 @@ const dialog = useDialog()
 const confirmDialog = useConfirmDialog()
 const manager = useTextModelManager()
 provide('textModelManager', manager)
-const visibleModels = computed(() => manager.models.value.filter(model => !isChromeBuiltInPlaceholder(model)))
+const subscription = ref<InstanceType<typeof ChatGPTSubscriptionConnection>>()
+const hasSubscription = ref(false)
+function onSubscriptionAvailability(connected: boolean) {
+  hasSubscription.value = connected
+  emit('subscriptionAvailability', connected)
+}
+const subscriptionModel = computed(() => {
+  const account = subscription.value?.account?.state
+  if (account?.status !== 'connected' || !account.connectionRef) return undefined
+  return manager.models.value.find(model => model.providerId === CHATGPT_SUBSCRIPTION_PROVIDER
+    && model.connectionConfig.subscriptionRef === account.connectionRef)
+})
+const visibleModels = computed(() => manager.models.value.filter(model => !isChromeBuiltInPlaceholder(model)
+  && (model.providerId !== CHATGPT_SUBSCRIPTION_PROVIDER || model === subscriptionModel.value)))
 
 const showEditModal = ref(false)
 const modelsReady = ref(false)
@@ -78,6 +101,18 @@ const handleLocalService = async (service: DiscoveredLocalService) => {
 }
 const editingModelId = ref<string | null>(null)
 const isTestingConnectionFor = (id: string) => !!manager.testingConnections.value[id]
+async function refreshSubscriptionModels() {
+  await manager.loadModels()
+  if (showEditModal.value && manager.form.value.providerId === CHATGPT_SUBSCRIPTION_PROVIDER) {
+    if (subscriptionModel.value && subscriptionModel.value.id === editingModelId.value) {
+      manager.setSubscriptionCatalog(subscriptionModel.value)
+    } else {
+      updateEditModalVisibility(false)
+      manager.resetFormState()
+    }
+  }
+  emit('modelsUpdated')
+}
 const handleModelUpdated = async (id?: string) => {
   await manager.loadModels()
   const targetId = id || manager.models.value[0]?.id
@@ -185,8 +220,17 @@ const openAddModal = async () => {
   showEditModal.value = true
 }
 
+function openSubscription() {
+  if (subscriptionModel.value) {
+    void handleEditModel(subscriptionModel.value.id)
+    return
+  }
+  showEditModal.value = false
+  subscription.value?.open()
+}
+
 defineExpose({
-  openAddModal,
+  openAddModal, openSubscription,
   openEditModal: handleEditModel,
   refresh: manager.loadModels
 })

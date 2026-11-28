@@ -1,10 +1,11 @@
 <template>
   <div class="model-selection">
   <ModelSelector v-bind="$attrs" :model-value="modelValue ? normalizedValue : ''" :groups="groups"
-    :selected-config="additionalSelection?.group.label || selected?.primary" :selected-label="additionalSelection?.choice.label || (selected ? compactName(selected.primary, selectedModelName).split('/').pop() : '')"
+    :selected-config="additionalSelection?.group.label || selected?.primary" :selected-label="additionalSelection?.choice.label || selectedModelName"
     :size="size" :disabled="disabled" :placeholder="placeholder" :aria-label="ariaLabel"
     :show-model-types="showModelTypes"
     :clearable="clearable" :clear-label="clearLabel" show-config-action
+    :config-action-label="!groups.length ? t('modelManager.addModel') : undefined"
     @update:model-value="choose" @update:show="onShow" @focus="emit('focus')" @config="configure" @retry="retry">
     <template v-if="$slots['selection-detail'] || (parameters && parameterConfig && !additionalSelection)" #selection-detail>
       <slot name="selection-detail">
@@ -20,13 +21,16 @@
       </slot>
     </template>
   </ModelSelector>
+  <button v-if="subscription && selected?.raw.providerId === CHATGPT_SUBSCRIPTION_PROVIDER" type="button" class="subscription-usage"
+    @click="subscription.manageUsage()">{{ t('chatgptSubscription.usingPlan') }} · {{ t('chatgptSubscription.usage') }}</button>
   </div>
 </template>
 <script setup lang="ts">
 import { computed, inject, ref, unref, watch, type MaybeRef, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ModelSelector from './ModelSelector.vue'
 import ModelParameterControls from './ModelParameterControls.vue'
-import { decodeTextModelSelection, encodeTextModelSelection, resolveRuntimeTextModel, resolveTextModelParameterDefinitions } from '@prompt-optimizer/core'
+import { CHATGPT_SUBSCRIPTION_PROVIDER, decodeTextModelSelection, encodeTextModelSelection, resolveRuntimeTextModel, resolveTextModelParameterDefinitions } from '@prompt-optimizer/core'
 import type { AppServices } from '../types/services'
 import type { ModelSelectOption } from '../types/select-options'
 import type { ModelSelectorGroup } from '../types/model-selector'
@@ -34,6 +38,8 @@ import { findTextModelSelection, getTextModelSelectionConfigId } from '../utils/
 import { getTextModelCatalog, loadTextModelCatalog, mergeModelOptions, rankModelOptions, rememberTextModel } from '../composables/model/textModelCatalog'
 
 defineOptions({ inheritAttrs: false })
+const { t } = useI18n()
+const subscription = window.electronAPI?.chatgptSubscription
 const props = withDefaults(defineProps<{
   modelValue?: string
   options: MaybeRef<ModelSelectOption[]>
@@ -49,6 +55,7 @@ const props = withDefaults(defineProps<{
 }>(), { modelValue: '', disabled: false, size: 'medium' })
 const emit = defineEmits<{ 'update:modelValue': [value: string]; 'update:show': [value: boolean]; focus: []; config: [id?: string] }>()
 const services = inject<Ref<AppServices | null>>('services', ref(null))
+const addConnection = inject<((tab: 'text') => Promise<void>) | null>('addModelConnection', null)
 const openModelManager = inject<((tab: 'text', configId: string) => void | Promise<void>) | null>('openModelManager', null)
 const open = ref(false)
 const options = computed(() => unref(props.options) || [])
@@ -68,12 +75,17 @@ const parameterCache = new Map<string, Record<string, unknown>>()
 const parameterConfig = computed(() => {
   const base = options.value.find(option => option.value === configId.value)?.raw
   if (!base) return undefined
+  if (base.availableModels) {
+    const metadata = base.availableModels.find(model => model.id === modelId.value)
+    return metadata ? { ...base, modelId: metadata.id, modelMeta: metadata } : undefined
+  }
   try { return services.value?.textAdapterRegistry ? resolveRuntimeTextModel(base, { modelId: modelId.value }, services.value.textAdapterRegistry) : base }
   catch { return base }
 })
 const parameterDefinitions = computed(() => {
   const config = parameterConfig.value
   if (!config) return []
+  if (config.availableModels) return config.modelMeta.parameterDefinitions
   return services.value?.textAdapterRegistry ? resolveTextModelParameterDefinitions({ providerId: config.providerMeta.id,
     modelId: modelId.value, connectionConfig: config.connectionConfig || {}, savedDefinitions: config.modelMeta.parameterDefinitions,
     registry: services.value.textAdapterRegistry }) : config.modelMeta.parameterDefinitions
@@ -84,33 +96,35 @@ function updateParameters(value: Record<string, unknown>) {
   emit('update:modelValue', Object.keys(value).length ? encodeTextModelSelection(configId.value, modelId.value, value) : selectionKey(configId.value, modelId.value))
 }
 const selectedModelName = computed(() => {
-  const known = catalog.value?.entries[configId.value]?.models.find(model => model.value === modelId.value)?.label
-  if (known) return known
   const config = selected.value?.raw
   if (!config) return ''
+  if (config.availableModels) return config.availableModels.find(model => model.id === modelId.value)?.name || modelId.value
+  const known = catalog.value?.entries[configId.value]?.models.find(model => model.value === modelId.value)?.label
+  if (known) return known
   try {
     const name = services.value?.textAdapterRegistry?.getStaticModels(config.providerMeta.id).find(model => model.id === modelId.value)?.name
     if (name) return name
   } catch { /* Custom/removed providers retain their saved display name. */ }
-  return config.modelMeta.name || modelId.value
+  return config.modelMeta.id === modelId.value ? config.modelMeta.name : modelId.value
 })
-const compactName = (name: string, model: string) => model.toLocaleLowerCase().startsWith(name.toLocaleLowerCase() + ' ')
-  ? model.slice(name.length).trim() : model
 const orderedOptions = computed(() => [
   ...options.value.filter(option => option.value === configId.value),
   ...options.value.filter(option => option.value !== configId.value),
 ])
-const selectionKey = (id: string, model: string) => options.value.find(option => option.value === id)?.raw.modelMeta.id === model ? id : encodeTextModelSelection(id, model)
+const selectionKey = (id: string, model: string) => {
+  const config = options.value.find(option => option.value === id)?.raw
+  return config && !config.availableModels && config.modelMeta.id === model ? id : encodeTextModelSelection(id, model)
+}
 const normalizedValue = computed(() => selected.value ? selectionKey(configId.value, modelId.value) : props.modelValue)
 const groups = computed(() => [...orderedOptions.value.map(option => {
   const entry = catalog.value?.entries[option.value]
   const current = option.value === configId.value ? modelId.value : option.raw.modelMeta.id
-  const all = mergeModelOptions(entry?.models || [], [{ value: option.raw.modelMeta.id, label: option.raw.modelMeta.name }], current ? [{ value: current, label: current }] : [])
+  const all = option.raw.availableModels?.map(model => ({ value: model.id, label: model.name })) ?? mergeModelOptions(entry?.models || [], [{ value: option.raw.modelMeta.id, label: option.raw.modelMeta.name }], current ? [{ value: current, label: current }] : [])
   return {
     value: option.value, label: option.primary, kind: 'text' as const, searchText: option.secondary, configurable: true,
     loading: entry?.loading, failed: entry?.failed,
     choices: rankModelOptions(all, current, catalog.value?.recent[option.value] || []).map(model => ({
-      value: selectionKey(option.value, model.value), label: compactName(option.primary, model.label), searchText: model.value,
+      value: selectionKey(option.value, model.value), label: model.label, searchText: model.value,
     })),
   }
 }), ...(props.additionalGroups || [])])
@@ -149,6 +163,7 @@ function choose(value: string) {
 async function configure(id?: string) {
   if (id && props.additionalGroups?.some(group => group.value === id)) emit('config', id)
   else if (id && openModelManager) await openModelManager('text', id)
+  else if (!groups.value.length && addConnection) await addConnection('text')
   else emit('config')
 }
 function retry(id: string) {
@@ -159,5 +174,6 @@ watch(options, () => { if (open.value) void refresh() })
 defineExpose({ refresh })
 </script>
 <style scoped>
+.subscription-usage { cursor: pointer; color: var(--n-text-color-2, inherit); font-size: 0.75rem; background: none; border: 0; text-align: start; }
 .model-selection { width: 100%; min-width: 0; }
 </style>

@@ -157,7 +157,7 @@ const messages = {
     "home": "首页",
     "dashboard": "仪表盘",
     "promptOptimizer": "提示词优化器",
-    "modelManager": "模型管理",
+    "modelManager": "模型连接",
     "history": "历史记录",
     "templates": "功能提示词",
     "dataManager": "数据管理",

@@ -2019,6 +2019,10 @@ const openNavModelManager = (compact = false) => {
     modelManager.showConfig = true;
 };
 provide("openModelManager", openModelManager);
+provide("addModelConnection", async (tab: "text" | "image" | "video") => {
+    await openModelManager(tab);
+    await modelManagerDialogRef.value?.openAddConnection(tab);
+});
 
 // 提供 openContextEditor 接口（供 Pro Multi 等工作区直接调用）
 type ContextEditorOpenArg = ConversationMessage[] | "messages" | "variables" | "tools";

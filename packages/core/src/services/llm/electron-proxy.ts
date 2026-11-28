@@ -20,8 +20,8 @@ export class ElectronLLMProxy implements ILLMService {
     this.electronAPI = window.electronAPI;
   }
 
-  async testConnection(provider: string): Promise<void> {
-    await this.electronAPI.llm.testConnection(provider);
+  async testConnection(provider: string, draft?: Pick<RuntimeModelSelection, 'modelId' | 'paramOverrides'>): Promise<void> {
+    await this.electronAPI.llm.testConnection(provider, draft && safeSerializeForIPC(draft));
   }
 
   async sendVideoUnderstanding(request: VideoUnderstandingRequest, modelKey: string): Promise<LLMResponse> {

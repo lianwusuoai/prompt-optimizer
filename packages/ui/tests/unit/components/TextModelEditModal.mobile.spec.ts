@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, nextTick, provide, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
-import { TextAdapterRegistry } from '@prompt-optimizer/core'
+import { MemoryStorageProvider, ModelManager, TextAdapterRegistry } from '@prompt-optimizer/core'
 import TextModelEditModal from '../../../src/components/TextModelEditModal.vue'
 import ModelIdSelector from '../../../src/components/ModelIdSelector.vue'
 import { useTextModelManager } from '../../../src/composables/model/useTextModelManager'
@@ -12,7 +12,7 @@ vi.mock('../../../src/composables/ui/useWorkspaceLayout', () => ({
   useWorkspaceLayout: () => ({ isCompact: mocks.compact.current }),
 }))
 vi.mock('../../../src/composables/ui/useCompactModalBack', () => ({ useCompactModalBack: vi.fn() }))
-vi.mock('../../../src/composables/ui/useToast', () => ({ useToast: () => ({ error: mocks.error }) }))
+vi.mock('../../../src/composables/ui/useToast', () => ({ useToast: () => ({ error: mocks.error, success: vi.fn() }) }))
 vi.mock('../../../src/composables/ui/useConfirmDialog', () => ({ useConfirmDialog: () => ({ warning: mocks.warning }) }))
 vi.mock('naive-ui', async original => ({ ...await original<typeof import('naive-ui')>(), useDialog: () => ({ warning: vi.fn() }) }))
 
@@ -72,6 +72,66 @@ beforeEach(() => { vi.clearAllMocks(); mocks.warning.mockResolvedValue(false) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('mobile text model editor draft lifecycle', () => {
+  it('edits a subscription using its catalog, tests the unsaved choice and saves the same connection', async () => {
+    mocks.compact.current = ref(true)
+    const registry = new TextAdapterRegistry({ access: vi.fn() })
+    const backend = new ModelManager(new MemoryStorageProvider(), registry)
+    await backend.syncSubscriptionModels('fixture', [
+      { slug: 'a', name: 'Model A', efforts: ['low'], tools: false },
+      { slug: 'b', name: 'Model B', efforts: ['high'], tools: true },
+    ])
+    const id = 'chatgpt-subscription:fixture'
+    const testConnection = vi.fn()
+    let manager!: ReturnType<typeof useTextModelManager>
+    const Harness = defineComponent({
+      setup() {
+        manager = useTextModelManager()
+        provide('textModelManager', manager)
+        return () => h(TextModelEditModal, { show: true })
+      },
+    })
+    const wrapper = mount(Harness, { global: { stubs: editorStubs,
+      provide: { services: ref({ modelManager: backend, textAdapterRegistry: registry, llmService: { testConnection } }) },
+    } })
+    try {
+      await manager.prepareForEdit(id)
+      await flushPromises()
+      expect(wrapper.find('[data-testid="text-model-provider-select"]').exists()).toBe(false)
+      const picker = wrapper.getComponent(ModelIdSelector)
+      expect(picker.props('options')).toEqual([{ value: 'a', label: 'Model A' }, { value: 'b', label: 'Model B' }])
+      expect(picker.props('allowCustom')).toBe(false)
+      await wrapper.get('[data-testid="text-model-name"] input').setValue('My plan')
+      picker.vm.$emit('update:value', 'b')
+      await nextTick()
+      expect(manager.currentParameterDefinitions.value[0].allowedValues).toEqual(['high'])
+      manager.updateParamOverrides({ reasoning_effort: 'high' })
+      await wrapper.get('[data-testid="text-model-test"]').trigger('click')
+      await flushPromises()
+      expect(testConnection).toHaveBeenCalledWith(id, { modelId: 'b', paramOverrides: { reasoning_effort: 'high' } })
+      expect((await backend.getModel(id))?.modelId).toBe('a')
+      await wrapper.get('[data-testid="text-model-save"]').trigger('click')
+      await flushPromises()
+      expect(await backend.getModel(id)).toMatchObject({ name: 'My plan', modelId: 'b', paramOverrides: { reasoning_effort: 'high' } })
+      expect(wrapper.getComponent(TextModelEditModal).emitted('saved')).toEqual([[id]])
+    } finally { wrapper.unmount() }
+  })
+
+  it('opens desktop subscription authorization from the add form without converting the API draft', async () => {
+    vi.stubGlobal('electronAPI', { chatgptSubscription: {} })
+    const { wrapper, manager } = renderEditor()
+    try {
+      const provider = wrapper.getComponent('[data-testid="text-model-provider-select"]')
+      expect(provider.props('options')).not.toContainEqual(expect.objectContaining({ value: 'chatgpt-subscription' }))
+      manager.editingModelId.value = ''
+      await flushPromises()
+      expect(provider.props('options')).toContainEqual(expect.objectContaining({ value: 'chatgpt-subscription' }))
+      provider.vm.$emit('update:value', 'chatgpt-subscription')
+      await flushPromises()
+      expect(wrapper.emitted('subscription')).toHaveLength(1)
+      expect(manager.form.value.providerId).toBe('openai-compatible')
+    } finally { wrapper.unmount() }
+  })
+
   it('retains the real edit draft on mobile provider reselection and applies a different provider normally', async () => {
     mocks.compact.current = ref(true)
     const registry = new TextAdapterRegistry()

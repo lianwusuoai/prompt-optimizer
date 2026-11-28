@@ -57,6 +57,7 @@ export type {
 } from './services/llm/types'
 export { LLMService, createLLMService } from './services/llm/service'
 export { TextAdapterRegistry, createTextAdapterRegistry } from './services/llm/adapters/registry'
+export { CHATGPT_SUBSCRIPTION_PROVIDER } from './services/llm/adapters/chatgpt-subscription-adapter'
 export {
   CHROME_BUILT_IN_MODEL_ID,
   CHROME_BUILT_IN_AUTO_ENABLE_SOURCE,

@@ -54,7 +54,13 @@ export function describeRuntimeModel(config: TextModelConfig | ImageModelConfig)
 export function resolveRuntimeTextModel(base: TextModelConfig, selection: RuntimeModelSelection, registry: ITextAdapterRegistry): TextModelConfig {
   const modelId = selection.modelId?.trim() || base.modelMeta.id
   const providerId = base.providerId || base.providerMeta.id
-  const metadata = resolveTextModelMetadata({ providerId, modelId, registry,
+  const catalogModel = base.availableModels?.find(model => model.id === modelId)
+  if (base.availableModels && !catalogModel) {
+    const code = 'chatgptSubscription.modelUnavailable'
+    throw Object.assign(new Error(code), { code })
+  }
+  const metadata = catalogModel ? { providerMeta: base.providerMeta, modelMeta: catalogModel }
+    : resolveTextModelMetadata({ providerId, modelId, registry,
     existingProviderMeta: base.providerMeta, existingModelMeta: base.modelMeta })
   const schema = metadata.modelMeta.parameterDefinitions
   const inherited = inheritParameters(base, base.modelMeta.parameterDefinitions, schema)

@@ -7,8 +7,7 @@ async function exerciseDesktopBusiness(phase) {
   };
   // Check the video bridge and persisted model selection without issuing an Ark request.
   if (phase === 'first') {
-    const initial = await api.video.model();
-    check(initial.modelId === 'doubao-seedance-2-0-fast-260128' && !initial.customModel && !initial.configured, 'fresh video model');
+    check((await api.video.listModels()).length === 0, 'fresh video connections are empty');
     await api.preference.set('video-model/seedance', { model: 'ep-synthetic-fast', apiKey: 'fixture-only' });
   }
   const managedVideoId = 'video-ipc-studio';
@@ -37,10 +36,9 @@ async function exerciseDesktopBusiness(phase) {
   let ids = await api.preference.get(key, null);
   if (phase === 'first') {
     check(ids === null, 'first start is a fresh synthetic fixture');
-    const exemplar = (await api.model.getAllModels()).find(model => model.providerMeta?.id === 'openai');
-    check(Boolean(exemplar), 'real model metadata is available');
+    check((await api.model.getAllModels()).length === 0, 'fresh text connections are empty');
     await api.model.addModel({
-      ...exemplar, key: modelId, id: modelId, name: '合成 IPC 模型', enabled: true,
+      key: modelId, id: modelId, name: '合成 IPC 模型', enabled: true, providerId: 'openai', modelId: 'fixture-model',
       connectionConfig: { apiKey: 'synthetic-ipc-only', baseURL: 'https://fixture.invalid/v1' },
       paramOverrides: { temperature: 0.4 },
     });

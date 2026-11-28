@@ -60,6 +60,8 @@ export interface TextModelConfig {
   modelId?: string;
   providerMeta: TextProvider;
   modelMeta: TextModel;
+  /** Account-scoped catalog supplied by a managed connection. */
+  availableModels?: TextModel[];
   connectionConfig: {
     apiKey?: string;
     baseURL?: string;
@@ -115,6 +117,7 @@ export interface ModelConfig {
 // === 模型管理器接口 ===
 
 export interface IModelManager extends IImportExportable {
+  cleanupUnusedDefaults?(references?: unknown): Promise<void>
   ensureInitialized(): Promise<void>;
   isInitialized(): Promise<boolean>;
 

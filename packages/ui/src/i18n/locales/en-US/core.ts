@@ -157,7 +157,7 @@ const messages = {
     "home": "Home",
     "dashboard": "Dashboard",
     "promptOptimizer": "Prompt Optimizer",
-    "modelManager": "Model Manager",
+    "modelManager": "Model Connections",
     "history": "History",
     "templates": "Templates",
     "dataManager": "Data Manager",

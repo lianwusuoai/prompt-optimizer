@@ -270,7 +270,7 @@ export interface ILLMService {
   /**
    * 测试连接
    */
-  testConnection(provider: string): Promise<void>;
+  testConnection(provider: string, draft?: Pick<RuntimeModelSelection, 'modelId' | 'paramOverrides'>): Promise<void>;
 
   /**
    * 获取模型列表，以下拉选项格式返回

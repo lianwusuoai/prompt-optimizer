@@ -2,9 +2,11 @@ import { IModelManager, ModelConfig, TextModel, TextModelConfig, TextProvider } 
 import { IStorageProvider } from '../storage/types';
 import { decodeTextModelSelection, resolveTextModelSelection } from './selection';
 import { StorageAdapter } from '../storage/adapter';
-import { getAllModels, getBuiltinModelIds } from './defaults';
+import { reconcileConnectionDefaults } from './connection-defaults';
+import { getAllModels, getBuiltinModelIds, getDefaultTextModels } from './defaults';
 import { ModelConfigError } from '../llm/errors';
-import { validateOverrides } from './parameter-utils';
+import { ChatGPTSubscriptionAdapter, CHATGPT_SUBSCRIPTION_PROVIDER, subscriptionConnectionId, subscriptionModelMetadata, type SubscriptionModel } from '../llm/adapters/chatgpt-subscription-adapter';
+import { compatibleParameterOverrides, validateOverrides } from './parameter-utils';
 import { ElectronConfigManager, isElectronRenderer } from './electron-config';
 import { CORE_SERVICE_KEYS } from '../../constants/storage-keys';
 import { ImportExportError } from '../../interfaces/import-export';
@@ -32,6 +34,7 @@ export class ModelManager implements IModelManager {
   private readonly storage: IStorageProvider;
   private initPromise: Promise<void>;
   private registry?: ITextAdapterRegistry;
+  private activeSubscriptionId?: string;
 
   constructor(storageProvider: IStorageProvider, registry?: ITextAdapterRegistry) {
     // 使用适配器确保所有存储提供者都支持高级方法
@@ -81,176 +84,141 @@ export class ModelManager implements IModelManager {
    * 初始化模型管理器
    */
   private async init(): Promise<void> {
-    try {
-      console.log('[ModelManager] Initializing...');
+    if (isElectronRenderer()) await ElectronConfigManager.getInstance().syncFromMainProcess();
+    const defaults = this.getDefaultModels();
+    await this.reconcileDefaults(defaults);
+    const storedModels = await this.getModelsFromStorage();
+    const updatedModels = { ...storedModels };
+    let hasUpdates = false;
 
-      // 在Electron渲染进程中，先同步环境变量
-      if (isElectronRenderer()) {
-        console.log('[ModelManager] Electron environment detected, syncing config from main process...');
-        const configManager = ElectronConfigManager.getInstance();
-        await configManager.syncFromMainProcess();
-        console.log('[ModelManager] Environment variables synced from main process');
-      }
+    for (const [key, defaultConfig] of Object.entries(defaults)) {
+      if (!updatedModels[key]) continue;
+      // 检查现有模型是否为新格式
+      const existingModel = updatedModels[key];
 
-      // 从存储中加载现有配置
-      const storedData = await this.storage.getItem(this.storageKey);
+      if (isTextModelConfig(existingModel)) {
+        // 已经是新格式，保留用户配置，仅在缺失关键字段时补齐默认值
+        const copiedExistingModel = { ...existingModel } as TextModelConfig;
+        let updatedModel = this.patchBuiltinModelUpgrade(
+          key,
+          copiedExistingModel,
+          defaultConfig
+        );
+        let patched = false;
 
-      if (storedData) {
-        try {
-          const storedModels = JSON.parse(storedData);
-          console.log('[ModelManager] Loaded existing models from storage');
-
-          // 确保所有默认模型都存在，但保留用户的自定义配置
-          const defaults = this.getDefaultModels();
-          let hasUpdates = false;
-          const updatedModels = { ...storedModels };
-
-          for (const [key, defaultConfig] of Object.entries(defaults)) {
-            if (!updatedModels[key]) {
-              // 添加缺失的默认模型
-              updatedModels[key] = defaultConfig;
-              hasUpdates = true;
-              console.log(`[ModelManager] Added missing default model: ${key}`);
-            } else {
-              // 检查现有模型是否为新格式
-              const existingModel = updatedModels[key];
-
-              if (isTextModelConfig(existingModel)) {
-                // 已经是新格式，保留用户配置，仅在缺失关键字段时补齐默认值
-                const copiedExistingModel = { ...existingModel } as TextModelConfig;
-                let updatedModel = this.patchBuiltinModelUpgrade(
-                  key,
-                  copiedExistingModel,
-                  defaultConfig
-                );
-                let patched = false;
-
-                if (updatedModel !== copiedExistingModel) {
-                  updatedModels[key] = updatedModel;
-                  hasUpdates = true;
-                  console.log(`[ModelManager] Migrated legacy builtin model: ${key}`);
-                }
-
-                if (!updatedModel.providerMeta && defaultConfig.providerMeta) {
-                  updatedModel.providerMeta = defaultConfig.providerMeta;
-                  patched = true;
-                }
-
-                if (!updatedModel.modelMeta && defaultConfig.modelMeta) {
-                  updatedModel.modelMeta = defaultConfig.modelMeta;
-                  patched = true;
-                }
-
-                if (patched) {
-                  updatedModels[key] = updatedModel;
-                  hasUpdates = true;
-                  console.log(`[ModelManager] Patched missing metadata for model: ${key}`);
-                }
-
-                if (this.isDeepseekConfig(updatedModel)) {
-                  try {
-                    await this.getRegistry();
-                    const patchedDeepseekModel = this.patchDeepseekConfig(updatedModel, defaultConfig);
-                    if (patchedDeepseekModel !== updatedModel) {
-                      updatedModel = patchedDeepseekModel;
-                      updatedModels[key] = updatedModel;
-                      hasUpdates = true;
-                      console.log(`[ModelManager] Patched DeepSeek metadata for model: ${key}`);
-                    }
-                  } catch (error) {
-                    console.warn(`[ModelManager] Failed to patch DeepSeek metadata for ${key}:`, error);
-                  }
-                }
-
-                const backfillableFields = this.getBackfillableBuiltinConnectionFields(
-                  key,
-                  updatedModel,
-                  defaultConfig
-                );
-                const shouldAutoEnable = this.shouldAutoEnableBuiltinModel(
-                  key,
-                  updatedModel,
-                  defaultConfig,
-                  backfillableFields
-                );
-
-                // 内置模型在环境变量新增后，需要把缺失的必填连接字段回填到已有存储配置中。
-                if (backfillableFields.length > 0 || shouldAutoEnable) {
-                  const nextConnectionConfig = {
-                    ...(updatedModel.connectionConfig || {})
-                  }
-                  for (const field of backfillableFields) {
-                    nextConnectionConfig[field] = defaultConfig.connectionConfig?.[field]
-                  }
-
-                  updatedModel = {
-                    ...updatedModel,
-                    connectionConfig: nextConnectionConfig,
-                    enabled: shouldAutoEnable ? true : updatedModel.enabled
-                  };
-                  updatedModels[key] = updatedModel;
-                  hasUpdates = true;
-                  if (shouldAutoEnable) {
-                    console.log(`[ModelManager] Auto-enabled builtin model with new connection fields: ${key}`);
-                  } else {
-                    console.log(`[ModelManager] Backfilled missing connection fields for builtin model: ${key}`);
-                  }
-                }
-              } else if (isLegacyConfig(existingModel)) {
-                // 旧格式，尝试使用 Registry 转换为新格式
-                try {
-                  const registry = await this.getRegistry();
-                  const convertedModel = this.patchDeepseekConfig(
-                    await convertLegacyToTextModelConfigWithRegistry(key, existingModel, registry),
-                    defaultConfig
-                  );
-                  updatedModels[key] = convertedModel;
-                  hasUpdates = true;
-                  console.log(`[ModelManager] Converted legacy model to new format (via Registry): ${key}`);
-                } catch (error) {
-                  // Fallback 到硬编码转换
-                  console.warn(`[ModelManager] Registry conversion failed for ${key}, using fallback:`, error);
-                  const convertedModel = this.patchDeepseekConfig(
-                    convertLegacyToTextModelConfig(key, existingModel),
-                    defaultConfig
-                  );
-                  updatedModels[key] = convertedModel;
-                  hasUpdates = true;
-                  console.log(`[ModelManager] Converted legacy model to new format (via fallback): ${key}`);
-                }
-              } else {
-                // 未知格式，使用默认配置替换
-                updatedModels[key] = defaultConfig;
-                hasUpdates = true;
-                console.log(`[ModelManager] Replaced unknown format with default: ${key}`);
-              }
-            }
-          }
-
-          // 如果有更新，保存到存储
-          if (hasUpdates) {
-            await this.storage.setItem(this.storageKey, JSON.stringify(updatedModels));
-            console.log('[ModelManager] Saved updated models to storage');
-          }
-        } catch (error) {
-          console.error('[ModelManager] Failed to parse stored models, initializing with defaults:', error);
-          await this.storage.setItem(this.storageKey, JSON.stringify(this.getDefaultModels()));
+        if (updatedModel !== copiedExistingModel) {
+          updatedModels[key] = updatedModel;
+          hasUpdates = true;
+          console.log(`[ModelManager] Migrated legacy builtin model: ${key}`);
         }
-      } else {
-        console.log('[ModelManager] No existing models found, initializing with defaults');
-        await this.storage.setItem(this.storageKey, JSON.stringify(this.getDefaultModels()));
-      }
 
-      console.log('[ModelManager] Initialization completed');
-    } catch (error) {
-      console.error('[ModelManager] Initialization failed:', error);
-      // 如果初始化失败，至少保存默认配置到存储
-      try {
-        await this.storage.setItem(this.storageKey, JSON.stringify(this.getDefaultModels()));
-      } catch (saveError) {
-        console.error('[ModelManager] Failed to save default models:', saveError);
+        if (!updatedModel.providerMeta && defaultConfig.providerMeta) {
+          updatedModel.providerMeta = defaultConfig.providerMeta;
+          patched = true;
+        }
+
+        if (!updatedModel.modelMeta && defaultConfig.modelMeta) {
+          updatedModel.modelMeta = defaultConfig.modelMeta;
+          patched = true;
+        }
+
+        if (patched) {
+          updatedModels[key] = updatedModel;
+          hasUpdates = true;
+          console.log(`[ModelManager] Patched missing metadata for model: ${key}`);
+        }
+
+        if (this.isDeepseekConfig(updatedModel)) {
+          try {
+            await this.getRegistry();
+            const patchedDeepseekModel = this.patchDeepseekConfig(updatedModel, defaultConfig);
+            if (patchedDeepseekModel !== updatedModel) {
+              updatedModel = patchedDeepseekModel;
+              updatedModels[key] = updatedModel;
+              hasUpdates = true;
+              console.log(`[ModelManager] Patched DeepSeek metadata for model: ${key}`);
+            }
+          } catch (error) {
+            console.warn(`[ModelManager] Failed to patch DeepSeek metadata for ${key}:`, error);
+          }
+        }
+
+        const backfillableFields = this.getBackfillableBuiltinConnectionFields(
+          key,
+          updatedModel,
+          defaultConfig
+        );
+        const shouldAutoEnable = this.shouldAutoEnableBuiltinModel(
+          key,
+          updatedModel,
+          defaultConfig,
+          backfillableFields
+        );
+
+        // 内置模型在环境变量新增后，需要把缺失的必填连接字段回填到已有存储配置中。
+        if (backfillableFields.length > 0 || shouldAutoEnable) {
+          const nextConnectionConfig = {
+            ...(updatedModel.connectionConfig || {})
+          }
+          for (const field of backfillableFields) {
+            nextConnectionConfig[field] = defaultConfig.connectionConfig?.[field]
+          }
+
+          updatedModel = {
+            ...updatedModel,
+            connectionConfig: nextConnectionConfig,
+            enabled: shouldAutoEnable ? true : updatedModel.enabled
+          };
+          updatedModels[key] = updatedModel;
+          hasUpdates = true;
+          if (shouldAutoEnable) {
+            console.log(`[ModelManager] Auto-enabled builtin model with new connection fields: ${key}`);
+          } else {
+            console.log(`[ModelManager] Backfilled missing connection fields for builtin model: ${key}`);
+          }
+        }
+      } else if (isLegacyConfig(existingModel)) {
+        // 旧格式，尝试使用 Registry 转换为新格式
+        try {
+          const registry = await this.getRegistry();
+          const convertedModel = this.patchDeepseekConfig(
+            await convertLegacyToTextModelConfigWithRegistry(key, existingModel, registry),
+            defaultConfig
+          );
+          updatedModels[key] = convertedModel;
+          hasUpdates = true;
+          console.log(`[ModelManager] Converted legacy model to new format (via Registry): ${key}`);
+        } catch (error) {
+          // Fallback 到硬编码转换
+          console.warn(`[ModelManager] Registry conversion failed for ${key}, using fallback:`, error);
+          const convertedModel = this.patchDeepseekConfig(
+            convertLegacyToTextModelConfig(key, existingModel),
+            defaultConfig
+          );
+          updatedModels[key] = convertedModel;
+          hasUpdates = true;
+          console.log(`[ModelManager] Converted legacy model to new format (via fallback): ${key}`);
+        }
       }
     }
+    if (hasUpdates) {
+      await this.storage.updateData<Record<string, unknown>>(this.storageKey, current => {
+        const next = { ...current };
+        for (const [key, value] of Object.entries(updatedModels)) {
+          if (value !== storedModels[key] && JSON.stringify(next[key]) === JSON.stringify(storedModels[key])) next[key] = value;
+        }
+        return next;
+      });
+    }
+  }
+
+  private reconcileDefaults(defaults: Record<string, TextModelConfig>, references?: unknown) {
+    return reconcileConnectionDefaults(this.storage, this.storageKey, defaults, () => getDefaultTextModels(undefined, () => ''), references);
+  }
+
+  async cleanupUnusedDefaults(references?: unknown): Promise<void> {
+    await this.ensureInitialized();
+    await this.reconcileDefaults(this.getDefaultModels(), references);
   }
 
   private patchBuiltinModelUpgrade(
@@ -551,7 +519,8 @@ export class ModelManager implements IModelManager {
   private normalizeStoredTextModelConfig(
     key: string,
     rawConfig: unknown,
-    registry: ITextAdapterRegistry
+    registry: ITextAdapterRegistry,
+    applyAvailability = true
   ): TextModelConfig {
     try {
       let textConfig: TextModelConfig
@@ -565,11 +534,15 @@ export class ModelManager implements IModelManager {
       }
 
       const migrated = this.migrateConfig(textConfig)
-      return this.normalizeTextModelConfig(
+      const normalized = this.normalizeTextModelConfig(
         this.patchProviderMeta(this.patchDeepseekConfig(migrated)),
         registry,
         { allowLegacyMetadataMismatch: true }
       )
+      if (applyAvailability && normalized.providerId === CHATGPT_SUBSCRIPTION_PROVIDER && key !== this.activeSubscriptionId) {
+        return { ...normalized, enabled: false }
+      }
+      return normalized
     } catch (error) {
       const defaultBackfilledConfig = this.buildDefaultBackfilledConfig(key, rawConfig)
       if (defaultBackfilledConfig) {
@@ -600,6 +573,24 @@ export class ModelManager implements IModelManager {
 
     if (!identity) {
       throw new ModelConfigError('Missing provider/model identity')
+    }
+
+    if (identity.providerId === CHATGPT_SUBSCRIPTION_PROVIDER) {
+      const ref = config.connectionConfig?.subscriptionRef
+      if (typeof ref !== 'string' || !ref || config.id !== subscriptionConnectionId(ref)) {
+        throw new ModelConfigError('Invalid ChatGPT subscription model reference')
+      }
+      // Backups can be opened by a runtime without a desktop session.
+      const adapter = new ChatGPTSubscriptionAdapter()
+      const catalogModel = config.availableModels?.find(model => model.id === identity.modelId)
+      if (config.availableModels && !catalogModel) {
+        const code = 'chatgptSubscription.modelUnavailable'
+        throw Object.assign(new Error(code), { code })
+      }
+      const modelMeta = catalogModel ?? (config.modelMeta?.providerId === identity.providerId && config.modelMeta.id === identity.modelId
+        ? config.modelMeta : adapter.buildDefaultModel(identity.modelId))
+      return { id: config.id, name: config.name, enabled: config.enabled, ...identity,
+        providerMeta: adapter.getProvider(), modelMeta, availableModels: config.availableModels, connectionConfig: { subscriptionRef: ref }, paramOverrides: config.paramOverrides }
     }
 
     const hasIncomingMismatch = hasTextModelMetadataIdentityMismatch(
@@ -830,24 +821,46 @@ export class ModelManager implements IModelManager {
     const storedData = await this.storage.getItem(this.storageKey);
     if (storedData) {
       try {
-        return JSON.parse(storedData);
+        return Object.fromEntries(Object.entries(JSON.parse(storedData)).filter(([, config]) => config !== null));
       } catch (error) {
         console.error('[ModelManager] Failed to parse stored models, using defaults:', error);
       }
     }
-    return this.getDefaultModels();
+    return {};
   }
 
   /**
    * 获取所有模型配置（返回 TextModelConfig）
    */
-  async getAllModels(): Promise<TextModelConfig[]> {
+  async syncSubscriptionModels(ref: string | null, catalog: SubscriptionModel[]): Promise<void> {
+    await this.ensureInitialized();
+    const id = ref ? subscriptionConnectionId(ref) : undefined;
+    const availableModels = catalog.map(subscriptionModelMetadata);
+    await this.storage.updateData<Record<string, TextModelConfig | null>>(this.storageKey, current => {
+      const models = Object.fromEntries(Object.entries(current ?? {}).filter(([, config]) =>
+        config?.providerId !== CHATGPT_SUBSCRIPTION_PROVIDER));
+      if (id && availableModels.length) {
+        const existing = current?.[id];
+        const modelMeta = availableModels.find(model => model.id === existing?.modelId) ?? availableModels[0];
+        const providerMeta = new ChatGPTSubscriptionAdapter().getProvider();
+        models[id] = {
+          id, name: existing?.name ?? 'ChatGPT', enabled: existing?.enabled ?? true, providerId: providerMeta.id,
+          modelId: modelMeta.id, modelMeta, providerMeta, availableModels, connectionConfig: { subscriptionRef: ref },
+          paramOverrides: compatibleParameterOverrides(modelMeta.parameterDefinitions, existing?.paramOverrides),
+        };
+      }
+      return models;
+    });
+    this.activeSubscriptionId = id;
+  }
+
+  async getAllModels(applyAvailability = true): Promise<TextModelConfig[]> {
     await this.ensureInitialized();
     const models = await this.getModelsFromStorage();
     const registry = await this.getRegistry()
 
     return Object.entries(models).map(([key, config]) =>
-      this.normalizeStoredTextModelConfig(key, config, registry)
+      this.normalizeStoredTextModelConfig(key, config, registry, applyAvailability)
     )
   }
 
@@ -873,7 +886,7 @@ export class ModelManager implements IModelManager {
   /**
    * 添加模型配置（接受 TextModelConfig）
    */
-  async addModel(key: string, config: TextModelConfig): Promise<void> {
+  async addModel(key: string, config: TextModelConfig, importing = false): Promise<void> {
     await this.ensureInitialized();
     const registry = await this.getRegistry();
     const normalizedConfig = this.normalizeTextModelConfig(config, registry);
@@ -882,6 +895,7 @@ export class ModelManager implements IModelManager {
     // 保存时移除 customParamOverrides（已合并到 paramOverrides）
     const toStore = {
       ...normalizedConfig,
+      ...(!importing && getBuiltinModelIds().includes(key) && { activationState: { ...normalizedConfig.activationState, userConfigured: true } }),
       customParamOverrides: undefined
     }
 
@@ -889,7 +903,7 @@ export class ModelManager implements IModelManager {
       this.storageKey,
       (currentModels) => {
         // 使用存储中的数据，如果不存在则使用默认配置
-        const models = currentModels || this.getDefaultModels();
+        const models = currentModels || {};
 
         if (models[key]) {
           throw new ModelConfigError(`Model ${key} already exists`);
@@ -906,7 +920,7 @@ export class ModelManager implements IModelManager {
   /**
    * 更新模型配置（接受部分 TextModelConfig）
    */
-  async updateModel(key: string, config: Partial<TextModelConfig>): Promise<void> {
+  async updateModel(key: string, config: Partial<TextModelConfig>, importing = false): Promise<void> {
     await this.ensureInitialized();
     const registry = await this.getRegistry();
 
@@ -914,7 +928,7 @@ export class ModelManager implements IModelManager {
       this.storageKey,
       (currentModels) => {
         // 使用存储中的数据，如果不存在则使用默认配置
-        const models = currentModels || this.getDefaultModels();
+        const models = currentModels || {};
 
         // 如果模型不存在，检查是否是内置模型
         if (!models[key]) {
@@ -955,6 +969,7 @@ export class ModelManager implements IModelManager {
         const updatedConfig: TextModelConfig = {
           ...existingTextModelConfig,
           ...config,
+          ...(!importing && getBuiltinModelIds().includes(key) && { activationState: { ...existingTextModelConfig.activationState, ...config.activationState, userConfigured: true } }),
           providerId: config.providerId
             ?? config.providerMeta?.id
             ?? config.modelMeta?.providerId
@@ -1019,11 +1034,13 @@ export class ModelManager implements IModelManager {
       this.storageKey,
       (currentModels) => {
         // 使用存储中的数据，如果不存在则使用默认配置
-        const models = currentModels || this.getDefaultModels();
+        const models = currentModels || {};
 
         if (!models[key]) {
           throw new ModelConfigError(`Model ${key} does not exist`);
         }
+        // Keep explicit deletions of generated connections in the same atomic write.
+        if (getBuiltinModelIds().includes(key) || key.startsWith('custom_')) return { ...models, [key]: null };
         const { [key]: removed, ...remaining } = models;
         return remaining;
       }
@@ -1040,7 +1057,7 @@ export class ModelManager implements IModelManager {
       this.storageKey,
       (currentModels) => {
         // 使用存储中的数据，如果不存在则使用默认配置
-        const models = currentModels || this.getDefaultModels();
+        const models = currentModels || {};
 
         if (!models[key]) {
           throw new ModelConfigError(`Unknown model: ${key}`);
@@ -1048,6 +1065,10 @@ export class ModelManager implements IModelManager {
 
         // 获取现有配置并转换为 TextModelConfig
         const existingConfig = models[key];
+        if (existingConfig.providerId === CHATGPT_SUBSCRIPTION_PROVIDER && key !== this.activeSubscriptionId) {
+          const code = 'chatgptSubscription.modelUnavailable';
+          throw Object.assign(new Error(code), { code });
+        }
         let textModelConfig: TextModelConfig;
 
         if (isTextModelConfig(existingConfig)) {
@@ -1087,7 +1108,7 @@ export class ModelManager implements IModelManager {
       this.storageKey,
       (currentModels) => {
         // 使用存储中的数据，如果不存在则使用默认配置
-        const models = currentModels || this.getDefaultModels();
+        const models = currentModels || {};
 
         if (!models[key]) {
           throw new ModelConfigError(`Unknown model: ${key}`);
@@ -1114,6 +1135,7 @@ export class ModelManager implements IModelManager {
           ...models,
           [key]: {
             ...textModelConfig,
+            ...(getBuiltinModelIds().includes(key) && { activationState: { ...textModelConfig.activationState, userConfigured: true } }),
             enabled: false
           }
         };
@@ -1157,7 +1179,7 @@ export class ModelManager implements IModelManager {
       return false;
     }
 
-    if (storedConfig.enabled !== false) {
+    if (storedConfig.enabled !== false || storedConfig.activationState?.userConfigured) {
       return false;
     }
 
@@ -1290,7 +1312,7 @@ export class ModelManager implements IModelManager {
    */
   async exportData(): Promise<TextModelConfig[]> {
     try {
-      return await this.getAllModels();
+      return await this.getAllModels(false);
     } catch (error) {
       throw new ImportExportError(
         'Failed to export model data',
@@ -1340,11 +1362,11 @@ export class ModelManager implements IModelManager {
           await this.updateModel(key, {
             ...textModelConfig,
             enabled: textModelConfig.enabled !== undefined ? textModelConfig.enabled : existingModel.enabled
-          });
+          }, true);
           console.log(`Model ${key} already exists, configuration updated`);
         } else {
           // 如果模型不存在，添加新模型
-          await this.addModel(key, textModelConfig);
+          await this.addModel(key, textModelConfig, true);
           console.log(`Imported new model ${key}`);
         }
       } catch (error) {
@@ -1444,6 +1466,6 @@ export class ModelManager implements IModelManager {
  * @param storageProvider 存储提供器实例
  * @returns 模型管理器实例
  */
-export function createModelManager(storageProvider: IStorageProvider): ModelManager {
-  return new ModelManager(storageProvider);
+export function createModelManager(storageProvider: IStorageProvider, registry?: ITextAdapterRegistry): ModelManager {
+  return new ModelManager(storageProvider, registry);
 }

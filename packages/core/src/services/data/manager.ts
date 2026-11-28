@@ -211,6 +211,10 @@ export class DataManager implements IDataManager {
         }
       }
     }
+    // Evaluate imported defaults after history, settings and all workspace selections are restored.
+    const references = [dataToImport.savedComparisons, dataToImport.desktopRuns];
+    if (dataToImport.models !== undefined) await this.modelManager.cleanupUnusedDefaults?.(references);
+    if (dataToImport.imageModels !== undefined) await this.imageModelManager?.cleanupUnusedDefaults?.(references);
   }
 }
 

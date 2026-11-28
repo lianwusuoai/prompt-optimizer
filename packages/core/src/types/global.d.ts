@@ -43,7 +43,7 @@ interface Window {
           onError?: (error: Error) => void;
         }
       ) => Promise<void>;
-      testConnection: (provider: string) => Promise<void>;
+      testConnection: import('../services/llm/types').ILLMService['testConnection'];
       fetchModelList: (provider: string, customConfig?: any) => Promise<Array<{value: string, label: string}>>;
     };
     model: {

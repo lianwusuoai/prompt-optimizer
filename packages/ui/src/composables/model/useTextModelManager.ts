@@ -6,6 +6,8 @@ import {
   type ModelOption,
   type CustomRequestHeaderInput,
   CHROME_BUILT_IN_PROVIDER_ID,
+  CHATGPT_SUBSCRIPTION_PROVIDER,
+  compatibleParameterOverrides,
   type ChromeBuiltInDownloadProgress,
   type ChromeBuiltInStatus,
   type TextModel,
@@ -116,6 +118,7 @@ export function useTextModelManager() {
 
   const editingModelId = ref<string | null>(null)
   const editingModelMeta = ref<TextModel | null>(null)
+  const subscriptionCatalog = ref<TextModel[]>([])
   const formReady = ref(false)
   const localServiceApiKeyRequired = ref(false)
   const localServiceDraft = ref<LocalServiceResult | null>(null)
@@ -144,9 +147,11 @@ export function useTextModelManager() {
   const isLoadingModelOptions = ref(false)
   const currentProviderType = computed(() => form.value.providerId || 'custom')
   const isChromeBuiltInProvider = computed(() => currentProviderType.value === CHROME_BUILT_IN_PROVIDER_ID)
+  const isSubscription = computed(() => currentProviderType.value === CHATGPT_SUBSCRIPTION_PROVIDER)
+  const subscriptionSelection = computed(() => subscriptionCatalog.value.find(model => model.id === form.value.modelId))
 
   const providerOptions = computed(() =>
-    providers.value.map(provider => ({
+    providers.value.filter(provider => provider.id !== CHATGPT_SUBSCRIPTION_PROVIDER).map(provider => ({
       label: provider.name,
       value: provider.id,
       disabled: false
@@ -164,7 +169,7 @@ export function useTextModelManager() {
     registry: computed(() => textAdapterRegistry),
     providerId: computed(() => form.value.providerId || ''),
     modelId: computed(() => form.value.modelId || ''),
-    savedModelMeta: computed(() => editingModelMeta.value || undefined),
+    savedModelMeta: computed(() => isSubscription.value ? subscriptionSelection.value : editingModelMeta.value || undefined),
     connectionConfig: computed(() => form.value.connectionConfig),
     getParamOverrides: () => form.value.paramOverrides ?? {},
     setParamOverrides: value => {
@@ -226,6 +231,7 @@ export function useTextModelManager() {
   })
 
   const isConnectionConfigured = computed(() => {
+    if (isSubscription.value) return !!editingModelId.value && !!subscriptionSelection.value
     if (missingLocalServiceApiKey.value) return false
     if (!selectedProvider.value?.connectionSchema) return true
 
@@ -249,6 +255,7 @@ export function useTextModelManager() {
     return true
   })
   const canSaveForm = computed(() => {
+    if (isSubscription.value && !isConnectionConfigured.value) return false
     if (missingLocalServiceApiKey.value) return false
     if (isSaving.value) return false
     if (!form.value.name?.trim()) return false
@@ -325,6 +332,7 @@ export function useTextModelManager() {
     }
     editingModelId.value = null
     editingModelMeta.value = null
+    subscriptionCatalog.value = []
     formReady.value = false
     modelOptions.value = []
     formConnectionStatus.value = null
@@ -607,6 +615,10 @@ export function useTextModelManager() {
     const shouldResetOverrides = resetOverrides && !repairingMissingProvider
     const shouldResetConnectionConfig = resetConnectionConfig && !repairingMissingProvider
 
+    const previousProviderName = providers.value.find(entry => entry.id === form.value.providerId)?.name
+    if (!editingModelId.value && (!form.value.name || form.value.name === previousProviderName)) {
+      form.value.name = providers.value.find(entry => entry.id === providerId)?.name || ''
+    }
     form.value.providerId = providerId
     formConnectionStatus.value = null
     chromeBuiltInDownloadProgress.value = null
@@ -650,8 +662,9 @@ export function useTextModelManager() {
     await ensureProvidersLoaded()
     formReady.value = false
 
-    if (providers.value.length > 0) {
-      setProvider(providers.value[0].id, {
+    const firstProvider = providerOptions.value[0]
+    if (firstProvider) {
+      setProvider(firstProvider.value, {
         autoSelectFirstModel: true,
         resetOverrides: true
       })
@@ -709,6 +722,16 @@ export function useTextModelManager() {
     }
   }
 
+  const setSubscriptionCatalog = (config: TextModelConfig) => {
+    subscriptionCatalog.value = config.availableModels ?? []
+    modelOptions.value = subscriptionCatalog.value.map(model => ({ value: model.id, label: model.name }))
+    if (!subscriptionSelection.value) {
+      form.value.modelId = config.modelMeta.id
+      form.value.defaultModel = form.value.modelId
+    }
+    form.value.paramOverrides = compatibleParameterOverrides(subscriptionSelection.value?.parameterDefinitions ?? [], form.value.paramOverrides)
+  }
+
   const prepareForEdit = async (id: string, forceReload = true) => {
     // 如果已经在编辑同一个模型且不强制重新加载，则跳过
     if (!forceReload && editingModelId.value === id && formReady.value) {
@@ -747,6 +770,10 @@ export function useTextModelManager() {
       }
       editingModelMeta.value = form.value.modelId ? model.modelMeta : null
 
+      if (isSubscription.value) {
+        setSubscriptionCatalog(model)
+        return
+      }
       if (form.value.providerId) {
         setProvider(form.value.providerId, {
           autoSelectFirstModel: false,
@@ -938,6 +965,15 @@ export function useTextModelManager() {
     if (!form.value.originalId) {
       throw new Error('Invalid edit session')
     }
+    if (isSubscription.value) {
+      await modelManager.updateModel(form.value.originalId, {
+        name: form.value.name,
+        enabled: form.value.enabled,
+        modelId: form.value.modelId,
+        paramOverrides: { ...form.value.paramOverrides },
+      })
+      return form.value.originalId
+    }
 
     const existingConfig = await modelManager.getModel(form.value.originalId)
     if (!existingConfig) {
@@ -1054,75 +1090,68 @@ export function useTextModelManager() {
     }
   }
 
-  const testFormConnection = async () => {
-    // 使用 canTestFormConnection 的完整校验逻辑
-    if (!canTestFormConnection.value) return
+  const testApiDraft = async () => {
+    const existingConfig = editingModelId.value ? await modelManager.getModel(editingModelId.value) : undefined
 
+    const { providerMeta, modelMeta } = resolveFormMetadata(
+      form.value.providerId,
+      form.value.modelId,
+      existingConfig
+    )
+
+    const baseURL = typeof form.value.connectionConfig?.baseURL === 'string'
+      ? form.value.connectionConfig.baseURL.trim()
+      : undefined
+
+    const connectionConfig: TextConnectionConfig = {
+      baseURL: baseURL || existingConfig?.connectionConfig?.baseURL,
+      ...existingConfig?.connectionConfig,
+      ...form.value.connectionConfig,
+      apiKey: form.value.displayMaskedKey && form.value.originalApiKey
+        ? form.value.originalApiKey
+        : form.value.connectionConfig.apiKey
+    }
+    normalizeConnectionCustomHeaders(connectionConfig)
+
+    const tempConfig = {
+      id: `temp-test-${editingModelId.value || 'new'}-${Date.now()}`,
+      name: form.value.name || form.value.modelId,
+      enabled: form.value.enabled,
+      providerId: providerMeta.id,
+      modelId: modelMeta.id,
+      providerMeta,
+      modelMeta,
+      connectionConfig,
+      paramOverrides: { ...(form.value.paramOverrides || {}) }
+    } as TextModelConfig
+
+    await modelManager.addModel(tempConfig.id, tempConfig)
+    try {
+      await llmService.testConnection(tempConfig.id)
+    } finally {
+      try {
+        await modelManager.deleteModel(tempConfig.id)
+      } catch (cleanupError) {
+        console.warn('Failed to clean up temporary test model:', cleanupError)
+      }
+    }
+  }
+
+  const testFormConnection = async () => {
+    if (!canTestFormConnection.value) return
     isTestingFormConnection.value = true
     formConnectionStatus.value = { type: 'info', message: t('modelManager.testing') }
-
     try {
-      if (!form.value.providerId || !form.value.modelId) {
-        throw new Error('No model selected')
-      }
-
       const customHeaderError = getCustomHeaderValidationMessage()
-      if (customHeaderError) {
-        throw new Error(customHeaderError)
+      if (customHeaderError) throw new Error(customHeaderError)
+      if (isSubscription.value && editingModelId.value) {
+        await llmService.testConnection(editingModelId.value, { modelId: form.value.modelId, paramOverrides: { ...form.value.paramOverrides } })
+      } else {
+        await testApiDraft()
       }
-
-      // 编辑模式下获取现有配置，新增模式下为 undefined
-      const existingConfig = editingModelId.value ? await modelManager.getModel(editingModelId.value) : undefined
-
-      const { providerMeta, modelMeta } = resolveFormMetadata(
-        form.value.providerId,
-        form.value.modelId,
-        existingConfig
-      )
-
-      const baseURL = typeof form.value.connectionConfig?.baseURL === 'string'
-        ? form.value.connectionConfig.baseURL.trim()
-        : undefined
-
-      const connectionConfig: TextConnectionConfig = {
-        baseURL: baseURL || existingConfig?.connectionConfig?.baseURL,
-        ...existingConfig?.connectionConfig,
-        ...form.value.connectionConfig,
-        apiKey: form.value.displayMaskedKey && form.value.originalApiKey
-          ? form.value.originalApiKey
-          : form.value.connectionConfig.apiKey
-      }
-      normalizeConnectionCustomHeaders(connectionConfig)
-
-      const tempConfig = {
-        id: `temp-test-${editingModelId.value || 'new'}-${Date.now()}`,
-        name: form.value.name || form.value.modelId,
-        enabled: form.value.enabled,
-        providerId: providerMeta.id,
-        modelId: modelMeta.id,
-        providerMeta,
-        modelMeta,
-        connectionConfig,
-        paramOverrides: { ...(form.value.paramOverrides || {}) }
-      } as TextModelConfig
-
-      await modelManager.addModel(tempConfig.id, tempConfig)
-
-      try {
-        // 测试临时模型
-        await llmService.testConnection(tempConfig.id)
-        const displayName = form.value.name || form.value.modelId
-        formConnectionStatus.value = { type: 'success', message: t('modelManager.testSuccess', { provider: displayName }) }
-        toast.success(t('modelManager.testSuccess', { provider: displayName }))
-      } finally {
-        // 清理临时模型
-        try {
-          await modelManager.deleteModel(tempConfig.id)
-        } catch (cleanupError) {
-          console.warn('Failed to clean up temporary test model:', cleanupError)
-        }
-      }
-
+      const message = t('modelManager.testSuccess', { provider: form.value.name || form.value.modelId })
+      formConnectionStatus.value = { type: 'success', message }
+      toast.success(message)
     } catch (error) {
       console.error('Connection test failed:', error)
       const displayName = form.value.name || form.value.modelId
@@ -1158,6 +1187,11 @@ export function useTextModelManager() {
     form.value.modelId = modelId
     form.value.defaultModel = modelId || ''
 
+    if (isSubscription.value) {
+      form.value.paramOverrides = compatibleParameterOverrides(subscriptionSelection.value?.parameterDefinitions ?? [], form.value.paramOverrides)
+      formConnectionStatus.value = null
+      return
+    }
     if (modelId && form.value.providerId) {
       // 编辑模式：合并参数（保留用户已有配置）
       // 创建模式：替换参数（使用新模型的默认值）
@@ -1212,6 +1246,7 @@ export function useTextModelManager() {
     prepareForCreate,
     prepareForLocalService,
     prepareForEdit,
+    setSubscriptionCatalog,
     refreshModelOptions,
     cancelLocalModelRequest,
     saveForm,

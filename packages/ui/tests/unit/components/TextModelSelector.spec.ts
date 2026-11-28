@@ -33,6 +33,45 @@ async function open(wrapper: ReturnType<typeof mount>) {
 const click = async (element: Element | null) => { (element as HTMLElement).click(); await flushPromises() }
 
 describe('shared text model selector', () => {
+  it('opens the add-connection form directly from an empty workspace', async () => {
+    const addModelConnection = vi.fn()
+    const wrapper = mount(TextModelSelector, { attachTo: document.body, props: { options: [] },
+      global: { provide: { addModelConnection } } })
+    mounted.push(wrapper)
+    await open(wrapper)
+    const add = document.querySelector('.text-model-menu__footer button')
+    expect(add?.textContent).toBe('Add Connection')
+    await click(add)
+    expect(addModelConnection).toHaveBeenCalledWith('text')
+  })
+
+  it('lets two test columns pick different models from the same authoritative account catalog', async () => {
+    const { options, services } = fixture()
+    const account = options[0]
+    account.primary = 'ChatGPT'
+    account.raw.providerId = account.raw.providerMeta.id = 'chatgpt-subscription'
+    account.raw.availableModels = ['A', 'B'].map(letter => ({
+      ...account.raw.modelMeta, providerId: 'chatgpt-subscription', id: letter, name: 'ChatGPT ' + letter,
+    }))
+    account.raw.modelId = 'A'
+    account.raw.modelMeta = account.raw.availableModels[0]
+    for (const letter of ['A', 'B']) {
+      const wrapper = mount(TextModelSelector, { attachTo: document.body, props: { options: [account], modelValue: account.value },
+        global: { provide: { services: ref(services) } } })
+      mounted.push(wrapper)
+      await open(wrapper)
+      const choices = Array.from(document.querySelectorAll('[data-model-choice]'))
+      expect(choices.map(choice => choice.textContent?.trim())).toEqual(['ChatGPT A', 'ChatGPT B'])
+      await click(choices.find(choice => choice.textContent?.trim() === 'ChatGPT ' + letter)!)
+      const [selection] = wrapper.emitted('update:modelValue')!.at(-1)!
+      expect(decodeTextModelSelection(String(selection))).toMatchObject({ configId: account.value, modelId: letter })
+      await wrapper.setProps({ modelValue: String(selection) })
+      expect(wrapper.get('.text-model-selector__name').text()).toBe('ChatGPT ' + letter)
+    }
+    expect(services.llmService.fetchModelList).not.toHaveBeenCalled()
+    expect(services.modelManager.updateModel).not.toHaveBeenCalled()
+  })
+
   it('selects image groups in the same menu without changing text recents or saved configurations', async () => {
     const { options, services } = fixture()
     const value = 'image:' + encodeTextModelSelection('office', 'gpt-image-1')

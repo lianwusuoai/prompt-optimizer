@@ -4,14 +4,14 @@
       :disabled="disabled" :style="{ padding: '0' }">
       <template #trigger>
         <button v-bind="$attrs" ref="trigger" type="button" class="text-model-selector"
-          :class="{ 'text-model-selector--small': size === 'small', 'text-model-selector--with-detail': !!$slots['selection-detail'], 'is-open': open }"
+          :class="{ 'text-model-selector--small': size === 'small', 'text-model-selector--with-detail': !!$slots['selection-detail'], 'has-shared-model-name': sharedModelName, 'is-open': open }"
           :style="colors" :disabled="disabled" :aria-expanded="open" aria-haspopup="dialog"
           :aria-label="triggerLabel" :title="selectionTitle"
           @focus="emit('focus')" @keydown.down.prevent="showFromKeyboard" @keydown.esc="close">
           <span v-if="selectedLabel" class="text-model-selector__value">
-            <span v-if="selectedConfig" class="text-model-selector__config">{{ selectedConfig }}</span>
-            <span v-if="selectedConfig" class="text-model-selector__separator">·</span>
             <span class="text-model-selector__name">{{ selectedLabel }}</span>
+            <span v-if="selectedConfig && selectedConfig !== selectedLabel" class="text-model-selector__separator">·</span>
+            <span v-if="selectedConfig && selectedConfig !== selectedLabel" class="text-model-selector__config">{{ selectedConfig }}</span>
           </span>
           <span v-else class="text-model-selector__placeholder">{{ placeholder || t('model.select.placeholder') }}</span>
           <span v-if="selectedLabel && $slots['selection-detail']" class="text-model-selector__detail"><slot name="selection-detail" /></span>
@@ -60,7 +60,7 @@
           <div v-if="hasPopoverParameters()" class="text-model-menu__parameters"><slot name="parameters" /></div>
           <footer v-if="(clearable && modelValue) || showConfigAction" class="text-model-menu__footer">
             <button v-if="clearable && modelValue" type="button" @click="choose('')">{{ clearLabel || t('model.selector.clear') }}</button>
-            <button v-if="showConfigAction" type="button" @click="configure()">{{ t('model.selector.manage') }}</button>
+            <button v-if="showConfigAction" type="button" @click="configure()">{{ configActionLabel || t('model.selector.manage') }}</button>
           </footer>
         </div>
       </section>
@@ -92,6 +92,7 @@ const props = withDefaults(defineProps<{
   ariaLabel?: string
   showModelTypes?: boolean
   showConfigAction?: boolean
+  configActionLabel?: string
   clearable?: boolean
   clearLabel?: string
   allowCustom?: boolean
@@ -122,7 +123,9 @@ const listHeight = computed(() => Math.min(340, viewport.layout.value?.bodyMaxHe
 const selectedKind = computed(() => props.groups.find(group => group.choices.some(choice => choice.value === props.modelValue))?.kind)
 const kindLabel = (kind: ModelSelectorKind) => t(`model.selector.${kind === 'image' ? 'imageGeneration' : 'textGeneration'}`)
 const kindIcon = (kind?: ModelSelectorKind) => kind === 'image' ? ImageIcon : MessageSquareText
-const selectionTitle = computed(() => [props.showModelTypes && selectedKind.value ? kindLabel(selectedKind.value) : '', props.selectedConfig, props.selectedLabel].filter(Boolean).join(' · '))
+const selectionTitle = computed(() => [props.showModelTypes && selectedKind.value ? kindLabel(selectedKind.value) : '', props.selectedLabel, props.selectedConfig].filter(Boolean).join(' · '))
+const sharedModelName = computed(() => !!props.selectedLabel && props.groups.filter(group =>
+  group.choices.some(model => model.label === props.selectedLabel)).length > 1)
 const triggerLabel = computed(() => [props.ariaLabel || t('model.selector.choose'), ...(props.showModelTypes && selectedKind.value ? [kindLabel(selectedKind.value), props.selectedLabel] : [])].filter(Boolean).join(' · '))
 const colors = computed(() => ({
   '--selector-text': theme.value.textColor2, '--selector-muted': theme.value.textColor3,
@@ -195,10 +198,10 @@ watch(() => props.disabled, disabled => { if (disabled) open.value = false })
 .text-model-selector--small { height: 28px; font-size: 13px; padding-inline: 8px; }
 .text-model-selector { container-type: inline-size; }
 @container (max-width: 190px) {
-  .text-model-selector__config, .text-model-selector__separator { display: none; }
+  .text-model-selector:not(.has-shared-model-name) :is(.text-model-selector__config, .text-model-selector__separator) { display: none; }
 }
 @container (max-width: 280px) {
-  .text-model-selector--with-detail .text-model-selector__config, .text-model-selector--with-detail .text-model-selector__separator { display: none; }
+  .text-model-selector--with-detail:not(.has-shared-model-name) :is(.text-model-selector__config, .text-model-selector__separator) { display: none; }
 }
 .text-model-selector:hover:not(:disabled) { border-color: var(--selector-muted); }
 .text-model-selector:focus-visible, .text-model-selector.is-open { outline: 1px solid var(--selector-focus); outline-offset: 1px; }

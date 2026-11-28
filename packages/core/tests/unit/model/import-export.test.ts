@@ -17,6 +17,7 @@ describe('ModelManager Import/Export', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
   });
 
@@ -53,14 +54,13 @@ describe('ModelManager Import/Export', () => {
       expect(exportedTestModel?.enabled).toBe(true);
     });
 
-    it('should include built-in models in export', async () => {
-      const exportedData = await modelManager.exportData();
-
-      // 应该包含内置模型
-      const builtinModels = exportedData.filter(model =>
-        ['openai', 'anthropic', 'gemini'].includes(model.id)
-      );
-      expect(builtinModels.length).toBeGreaterThan(0);
+    it('should export a built-in connection configured by the environment', async () => {
+      vi.stubEnv('VITE_OPENAI_API_KEY', 'fixture-openai-key');
+      const configuredManager = new ModelManager(new MemoryStorageProvider(), registry);
+      const exportedData = await configuredManager.exportData();
+      expect(exportedData.find(model => model.id === 'openai')).toMatchObject({
+        enabled: true, connectionConfig: { apiKey: 'fixture-openai-key' }
+      });
     });
 
     it('should handle export error gracefully', async () => {

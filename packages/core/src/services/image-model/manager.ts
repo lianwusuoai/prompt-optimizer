@@ -11,6 +11,7 @@ import { ImportExportError } from '../../interfaces/import-export'
 import { IMAGE_ERROR_CODES, IMPORT_EXPORT_ERROR_CODES, type ErrorParams } from '../../constants/error-codes'
 import { BaseError } from '../llm/errors'
 import { getDefaultImageModels, getBuiltinImageConfigIds } from './defaults'
+import { reconcileConnectionDefaults } from '../model/connection-defaults'
 import { decodeImageModelSelection } from '../model/selection'
 import { resolveRuntimeImageModel } from '../model/runtime-selection'
 
@@ -49,93 +50,65 @@ export class ImageModelManager implements IImageModelManager {
   }
 
   private async init(): Promise<void> {
-    try {
-      const raw = await this.storage.getItem(this.storageKey)
-      if (!raw) {
-        // 没有任何配置，直接写入默认项
-        const defaults = getDefaultImageModels(this.registry)
-        await this.storage.setItem(this.storageKey, JSON.stringify(defaults))
-        return
+    const defaults = getDefaultImageModels(this.registry)
+    await this.reconcileDefaults(defaults)
+    await this.storage.updateData<Record<string, ImageModelConfig | null>>(this.storageKey, current => {
+      const data = { ...current }
+      for (const [key, config] of Object.entries(data)) {
+        if (config && !config.id) data[key] = { ...config, id: key }
       }
-
-      // 已有配置：补齐缺失的默认项（不覆盖用户已有）
-      let data: Record<string, ImageModelConfig>
-      try {
-        data = JSON.parse(raw) || {}
-      } catch {
-        data = {}
-      }
-      // 轻量迁移：为旧数据补齐缺失的 id（仅填充 id，不推导 provider/model）
-      // 说明：旧数据仅存在于开发阶段，不再做字段补齐（如 providerId/modelId/provider/model）。
-      // 目的仅为让 UI 能识别并删除这些条目，避免因缺少 id 无法操作。
-      let changed = false
-      for (const [key, cfg] of Object.entries(data)) {
-        if (cfg && typeof cfg === 'object' && !(cfg as any).id) {
-          ;(cfg as any).id = key
-          changed = true
-        }
-      }
-      const defaults = getDefaultImageModels(this.registry)
-      // 合并默认项，并检查是否需要自动启用内置模型
       for (const [key, cfg] of Object.entries(defaults)) {
-        if (!data[key]) {
-          // 添加缺失的默认模型
-          data[key] = cfg
-          changed = true
-        } else {
-          let existingConfig = data[key]
-          const upgradedConfig = this.patchBuiltinModelUpgrade(key, existingConfig, cfg)
-          if (upgradedConfig !== existingConfig) {
-            existingConfig = upgradedConfig
-            data[key] = upgradedConfig
-            changed = true
-            console.log(`[ImageModelManager] Migrated legacy builtin model: ${key}`)
+        if (!data[key]) continue
+        let existingConfig = data[key]
+        const upgradedConfig = this.patchBuiltinModelUpgrade(key, existingConfig, cfg)
+        if (upgradedConfig !== existingConfig) {
+          existingConfig = upgradedConfig
+          data[key] = upgradedConfig
+          console.log(`[ImageModelManager] Migrated legacy builtin model: ${key}`)
+        }
+        const backfillableFields = this.getBackfillableBuiltinConnectionFields(
+          key,
+          existingConfig,
+          cfg
+        )
+        const shouldAutoEnable = this.shouldAutoEnableBuiltinModel(
+          key,
+          existingConfig,
+          cfg,
+          backfillableFields
+        )
+
+        if (backfillableFields.length > 0 || shouldAutoEnable) {
+          const nextConnectionConfig = {
+            ...(existingConfig.connectionConfig || {})
           }
-          const backfillableFields = this.getBackfillableBuiltinConnectionFields(
-            key,
-            existingConfig,
-            cfg
-          )
-          const shouldAutoEnable = this.shouldAutoEnableBuiltinModel(
-            key,
-            existingConfig,
-            cfg,
-            backfillableFields
-          )
+          for (const field of backfillableFields) {
+            nextConnectionConfig[field] = cfg.connectionConfig?.[field]
+          }
 
-          if (backfillableFields.length > 0 || shouldAutoEnable) {
-            const nextConnectionConfig = {
-              ...(existingConfig.connectionConfig || {})
-            }
-            for (const field of backfillableFields) {
-              nextConnectionConfig[field] = cfg.connectionConfig?.[field]
-            }
-
-            data[key] = {
-              ...existingConfig,
-              connectionConfig: nextConnectionConfig,
-              enabled: shouldAutoEnable ? true : existingConfig.enabled
-            }
-            changed = true
-            if (shouldAutoEnable) {
-              console.log(`[ImageModelManager] Auto-enabled builtin model with new connection fields: ${key}`)
-            } else {
-              console.log(`[ImageModelManager] Backfilled missing connection fields for builtin model: ${key}`)
-            }
+          data[key] = {
+            ...existingConfig,
+            connectionConfig: nextConnectionConfig,
+            enabled: shouldAutoEnable ? true : existingConfig.enabled
+          }
+          if (shouldAutoEnable) {
+            console.log(`[ImageModelManager] Auto-enabled builtin model with new connection fields: ${key}`)
+          } else {
+            console.log(`[ImageModelManager] Backfilled missing connection fields for builtin model: ${key}`)
           }
         }
       }
+      return data
+    })
+  }
 
-      if (changed) {
-        await this.storage.setItem(this.storageKey, JSON.stringify(data))
-      }
-    } catch (e) {
-      // 初始化失败时，尽量写入默认项，避免空列表
-      try {
-        const defaults = getDefaultImageModels(this.registry)
-        await this.storage.setItem(this.storageKey, JSON.stringify(defaults))
-      } catch {}
-    }
+  private reconcileDefaults(defaults: Record<string, ImageModelConfig>, references?: unknown) {
+    return reconcileConnectionDefaults(this.storage, this.storageKey, defaults, () => getDefaultImageModels(this.registry, () => ''), references)
+  }
+
+  async cleanupUnusedDefaults(references?: unknown): Promise<void> {
+    await this.ensureInitialized()
+    await this.reconcileDefaults(getDefaultImageModels(this.registry), references)
   }
 
   private patchBuiltinModelUpgrade(
@@ -169,7 +142,7 @@ export class ImageModelManager implements IImageModelManager {
 
   // === 配置 CRUD 操作 ===
 
-  async addConfig(config: ImageModelConfigInput): Promise<void> {
+  async addConfig(config: ImageModelConfigInput, importing = false): Promise<void> {
     // 确保配置是自包含的
     const completeConfig = this.ensureSelfContained(config)
     this.validateConfig(completeConfig)
@@ -177,6 +150,7 @@ export class ImageModelManager implements IImageModelManager {
     // 保存时移除 customParamOverrides（已合并到 paramOverrides）
     const toStore = {
       ...completeConfig,
+      ...(!importing && getBuiltinImageConfigIds().includes(completeConfig.id) && { activationState: { userConfigured: true } }),
       customParamOverrides: undefined
     }
 
@@ -196,7 +170,7 @@ export class ImageModelManager implements IImageModelManager {
     )
   }
 
-  async updateConfig(id: string, updates: Partial<ImageModelConfigInput>): Promise<void> {
+  async updateConfig(id: string, updates: Partial<ImageModelConfigInput>, importing = false): Promise<void> {
     await this.storage.updateData<Record<string, ImageModelConfig>>(
       this.storageKey,
       (current) => {
@@ -222,6 +196,7 @@ export class ImageModelManager implements IImageModelManager {
         // 保存时移除 customParamOverrides（已合并到 paramOverrides）
         const toStore = {
           ...completeConfig,
+          ...(!importing && getBuiltinImageConfigIds().includes(id) && { activationState: { userConfigured: true } }),
           customParamOverrides: undefined
         }
 
@@ -231,7 +206,7 @@ export class ImageModelManager implements IImageModelManager {
   }
 
   async deleteConfig(id: string): Promise<void> {
-    await this.storage.updateData<Record<string, ImageModelConfig>>(
+    await this.storage.updateData<Record<string, ImageModelConfig | null>>(
       this.storageKey,
       (current) => {
         const data = current || {}
@@ -243,6 +218,8 @@ export class ImageModelManager implements IImageModelManager {
           // 仍然返回原数据，因为确实没什么可删的
           return data
         }
+
+        if (getBuiltinImageConfigIds().includes(id)) return { ...data, [id]: null }
 
         // 配置存在，正常删除
         const { [id]: removed, ...rest } = data
@@ -361,10 +338,10 @@ export class ImageModelManager implements IImageModelManager {
         const existing = await this.getConfig(completeConfig.id)
         if (existing) {
           // 更新现有配置
-          await this.updateConfig(completeConfig.id, completeConfig)
+          await this.updateConfig(completeConfig.id, completeConfig, true)
         } else {
           // 添加新配置
-          await this.addConfig(completeConfig)
+          await this.addConfig(completeConfig, true)
         }
       } catch (error) {
         failed.push(error as Error)
@@ -568,7 +545,7 @@ export class ImageModelManager implements IImageModelManager {
       return false
     }
 
-    if (storedConfig.enabled !== false) {
+    if (storedConfig.enabled !== false || storedConfig.activationState?.userConfigured) {
       return false
     }
 

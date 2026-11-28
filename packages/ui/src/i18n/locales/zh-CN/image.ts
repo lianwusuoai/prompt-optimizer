@@ -149,8 +149,8 @@ const messages = {
         "placeholder": "请输入配置名称"
       },
       "displayName": {
-        "label": "显示名称",
-        "placeholder": "请输入显示名称"
+        "label": "连接名称",
+        "placeholder": "输入连接名称"
       },
       "enabled": {
         "label": "启用状态"
@@ -208,7 +208,7 @@ const messages = {
       }
     },
     "model": {
-      "section": "模型配置",
+      "section": "默认模型",
       "label": "选择模型",
       "placeholder": "请选择模型",
       "loading": "正在加载模型...",
@@ -222,8 +222,8 @@ const messages = {
       "selectRequired": "请选择一个模型进行测试",
       "count": "共 {count} 个模型",
       "capabilities": "模型能力",
-      "empty": "暂无图像模型配置",
-      "addFirst": "添加第一个图像模型",
+      "empty": "暂无图像连接",
+      "addFirst": "添加图像连接",
       "staticLoaded": "已加载静态模型",
       "noStaticModels": "没有静态模型",
       "staticLoadFailed": "加载静态模型失败",

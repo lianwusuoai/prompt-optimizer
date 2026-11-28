@@ -42,7 +42,7 @@ export type VideoModelSummary = Omit<VideoModelConfig, 'apiKey'> & {
 }
 
 export const defaultVideoConfig = (): VideoModelConfig => ({
-  id: DEFAULT_VIDEO_CONFIG_ID, providerId: 'ark', name: 'Seedance 2.0 Fast', modelId: SEEDANCE_MODEL,
+  id: DEFAULT_VIDEO_CONFIG_ID, providerId: 'ark', name: 'Volcengine Ark', modelId: SEEDANCE_MODEL,
   baseURL: ARK_VIDEO_BASE_URL, apiKey: '', enabled: true,
 })
 
@@ -85,7 +85,10 @@ function parseLegacyPreference(raw: unknown): VideoModelConfig[] {
 }
 
 function readConfigs(raw: unknown): VideoModelConfig[] {
-  if (raw == null) return [defaultVideoConfig()]
+  if (raw == null) {
+    const config = defaultVideoConfig()
+    return resolveVideoApiKey(config) ? [config] : []
+  }
   return Array.isArray(raw) ? parseList(raw) : parseLegacyPreference(raw)
 }
 
@@ -117,12 +120,20 @@ export class VideoModelManager implements IImportExportable {
     return this.preferences.get<unknown>(VIDEO_MODEL_PREFERENCE, null)
   }
 
+  private async currentConfigs(raw: unknown): Promise<VideoModelConfig[]> {
+    const configs = readConfigs(raw)
+    if (raw == null && !configs.length && await this.hasPendingTask(DEFAULT_VIDEO_CONFIG_ID)) {
+      return [defaultVideoConfig()]
+    }
+    return configs
+  }
+
   async listModels(): Promise<VideoModelSummary[]> {
-    return readConfigs(await this.read()).map(summarizeVideoModel)
+    return (await this.currentConfigs(await this.read())).map(summarizeVideoModel)
   }
 
   async getConfig(id: string): Promise<VideoModelConfig> {
-    const config = readConfigs(await this.read()).find(item => item.id === id)
+    const config = (await this.currentConfigs(await this.read())).find(item => item.id === id)
     if (!config) throw new Error('video.error.configMissing')
     return config
   }
@@ -135,19 +146,21 @@ export class VideoModelManager implements IImportExportable {
     }
   }
 
-  private async assertTaskEndpointAvailable(id: string) {
+  private async hasPendingTask(id: string): Promise<boolean> {
     const value = await this.preferences.get<{ runs?: VideoRun[] } | string | null>(VIDEO_CREATE_SESSION_KEY, null)
     const session = typeof value === 'string' ? JSON.parse(value) : value
-    if (session?.runs?.some((run: VideoRun) => (run.configId ?? DEFAULT_VIDEO_CONFIG_ID) === id &&
-      ['submitting', 'unknown', 'queued', 'running'].includes(run.status))) {
-      throw new Error('video.error.configInUse')
-    }
+    return !!session?.runs?.some((run: VideoRun) => (run.configId ?? DEFAULT_VIDEO_CONFIG_ID) === id &&
+      ['submitting', 'unknown', 'queued', 'running'].includes(run.status))
+  }
+
+  private async assertTaskEndpointAvailable(id: string) {
+    if (await this.hasPendingTask(id)) throw new Error('video.error.configInUse')
   }
 
   async saveConfig(value: VideoModelConfig, previous: VideoModelConfig | null): Promise<void> {
     const config = parseConfig(value)
     const raw = await this.read()
-    const configs = readConfigs(raw)
+    const configs = await this.currentConfigs(raw)
     const existing = configs.find(item => item.id === config.id)
     if (JSON.stringify(existing ?? null) !== JSON.stringify(previous && parseConfig(previous))) {
       throw new Error('video.error.configChanged')
@@ -163,7 +176,7 @@ export class VideoModelManager implements IImportExportable {
 
   async removeConfig(id: string): Promise<void> {
     const raw = await this.read()
-    const configs = readConfigs(raw)
+    const configs = await this.currentConfigs(raw)
     await this.assertTaskEndpointAvailable(id)
     await this.write(raw, configs.filter(item => item.id !== id))
   }

@@ -15,6 +15,7 @@ import type { ModelManager } from '../model/manager';
 import { resolveTextModelMetadata } from '../model/metadata-resolver';
 import { APIError, RequestConfigError } from './errors';
 import { isRunningInElectron } from '../../utils/environment';
+import { CHATGPT_SUBSCRIPTION_PROVIDER } from './adapters/chatgpt-subscription-adapter';
 import { ElectronLLMProxy } from './electron-proxy';
 import { TextAdapterRegistry } from './adapters/registry';
 import { mergeOverrides, splitOverridesBySchema } from '../model/parameter-utils';
@@ -104,7 +105,7 @@ export class LLMService implements ILLMService {
       return await adapter.sendMessage(messages, runtimeConfig);
 
     } catch (error: any) {
-      if (error instanceof RequestConfigError || error instanceof APIError) {
+      if (error instanceof RequestConfigError || error instanceof APIError || error?.code?.startsWith?.('chatgptSubscription.')) {
         throw error;
       }
       throw new APIError(`Failed to send message: ${error.message}`);
@@ -134,7 +135,10 @@ export class LLMService implements ILLMService {
     try {
       this.validateMessages(messages);
 
-      const modelConfig = selection?.configSnapshot ?? await this.modelManager.getModel(provider);
+      const snapshot = selection?.configSnapshot;
+      const modelConfig = snapshot?.providerMeta?.id === CHATGPT_SUBSCRIPTION_PROVIDER
+        ? await this.modelManager.getModel(snapshot.id)
+        : snapshot ?? await this.modelManager.getModel(provider);
       if (!modelConfig) {
         throw new RequestConfigError(`Model ${provider} not found`);
       }
@@ -144,7 +148,10 @@ export class LLMService implements ILLMService {
       // 通过 Registry 获取 Adapter
       const adapter = this.registry.getAdapter(modelConfig.providerMeta.id);
 
-      const runtimeConfig = this.prepareRuntimeConfig(selection?.modelId ? resolveRuntimeTextModel(modelConfig, selection, this.registry) : modelConfig);
+      const chosen = snapshot?.providerMeta?.id === CHATGPT_SUBSCRIPTION_PROVIDER
+        ? { modelId: selection?.modelId || snapshot.modelMeta.id, paramOverrides: selection?.paramOverrides ?? snapshot.paramOverrides }
+        : selection;
+      const runtimeConfig = this.prepareRuntimeConfig(chosen?.modelId ? resolveRuntimeTextModel(modelConfig, chosen, this.registry) : modelConfig);
 
       // 使用 Adapter 发送流式消息
       await adapter.sendMessageStream(messages, runtimeConfig, callbacks);
@@ -195,7 +202,7 @@ export class LLMService implements ILLMService {
   /**
    * 测试连接
    */
-  async testConnection(provider: string): Promise<void> {
+  async testConnection(provider: string, draft?: Pick<RuntimeModelSelection, 'modelId' | 'paramOverrides'>): Promise<void> {
     try {
       if (!provider) {
         throw new RequestConfigError('Model provider cannot be empty');
@@ -221,11 +228,15 @@ export class LLMService implements ILLMService {
 
       // Send directly through the adapter to avoid the normal "enabled" constraint.
       const adapter = this.registry.getAdapter(modelConfig.providerMeta.id);
-      const runtimeConfig = this.prepareRuntimeConfig(modelConfig);
+      // An editor supplies the whole draft, including parameters the user has cleared.
+      const testConfig = draft
+        ? resolveRuntimeTextModel({ ...modelConfig, paramOverrides: {}, customParamOverrides: undefined }, draft, this.registry)
+        : modelConfig;
+      const runtimeConfig = this.prepareRuntimeConfig(testConfig);
       await adapter.sendMessage(testMessages, runtimeConfig);
 
     } catch (error: any) {
-      if (error instanceof RequestConfigError || error instanceof APIError) {
+      if (error instanceof RequestConfigError || error instanceof APIError || error?.code?.startsWith?.('chatgptSubscription.')) {
         throw error;
       }
       throw new APIError(`Connection test failed: ${error.message}`);
@@ -242,8 +253,13 @@ export class LLMService implements ILLMService {
     customConfig?: Partial<TextModelConfig> | Partial<ModelConfig>
   ): Promise<ModelOption[]> {
     try {
-      // 获取基础配置
-      const baseConfig = await this.modelManager.getModel(provider);
+      const configId = provider === CHATGPT_SUBSCRIPTION_PROVIDER && customConfig && 'id' in customConfig
+        ? customConfig.id : provider;
+      const baseConfig = configId ? await this.modelManager.getModel(configId) : undefined;
+      if (baseConfig?.providerId === CHATGPT_SUBSCRIPTION_PROVIDER) {
+        return (baseConfig.availableModels ?? []).map(model => ({ value: model.id, label: model.name }));
+      }
+      if (provider === CHATGPT_SUBSCRIPTION_PROVIDER) return [];
       const modelConfig = await this.buildEffectiveModelConfig(provider, baseConfig, customConfig);
 
       // 使用 Registry 获取模型列表
@@ -395,15 +411,12 @@ export class LLMService implements ILLMService {
  * @param modelManager 模型管理器实例
  * @returns LLM服务实例
  */
-export function createLLMService(modelManager: ModelManager): ILLMService {
+export function createLLMService(modelManager: ModelManager, registry?: ITextAdapterRegistry): ILLMService {
   // 在Electron环境中，返回代理实例
   if (isRunningInElectron()) {
     console.log('[LLM Service Factory] Electron environment detected, using proxy.');
     return new ElectronLLMProxy();
   }
-
-  // 创建 Registry 实例
-  const registry = new TextAdapterRegistry();
 
   // 返回注入了 Registry 的 LLMService 实例
   return new LLMService(modelManager, registry);

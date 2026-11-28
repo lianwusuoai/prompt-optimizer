@@ -7,6 +7,8 @@ import type {
 } from '../types';
 import { AbstractAdapterRegistry } from '../../adapters/abstract-registry';
 import { OpenAIAdapter } from './openai-adapter';
+import { ChatGPTSubscriptionAdapter, CHATGPT_SUBSCRIPTION_PROVIDER, type ChatGPTSubscriptionSession } from './chatgpt-subscription-adapter';
+import { isRunningInElectron } from '../../../utils/environment';
 import { OpenAICompatibleAdapter } from './openai-compatible-adapter';
 import { AnthropicAdapter } from './anthropic-adapter';
 import { GeminiAdapter } from './gemini-adapter';
@@ -38,6 +40,13 @@ export class TextAdapterRegistry
   >
   implements ITextAdapterRegistry
 {
+  constructor(subscription?: ChatGPTSubscriptionSession) {
+    super();
+    if (subscription || isRunningInElectron()) {
+      this.adapters.set(CHATGPT_SUBSCRIPTION_PROVIDER, new ChatGPTSubscriptionAdapter(subscription));
+    }
+  }
+
   protected createUnknownProviderError(providerId: string): Error {
     return new RequestConfigError(
       `Unknown ${this.getProviderTypeDescription()}: ${providerId}`,

@@ -149,8 +149,8 @@ const messages = {
         "placeholder": "Please enter configuration name"
       },
       "displayName": {
-        "label": "Display Name",
-        "placeholder": "Please enter display name"
+        "label": "Connection name",
+        "placeholder": "Enter a connection name"
       },
       "enabled": {
         "label": "Enable Status"
@@ -208,7 +208,7 @@ const messages = {
       }
     },
     "model": {
-      "section": "Model Configuration",
+      "section": "Default model",
       "label": "Model",
       "placeholder": "Please select model",
       "loading": "Loading models...",
@@ -222,8 +222,8 @@ const messages = {
       "selectRequired": "Please select a model to test",
       "count": "{count} models",
       "capabilities": "Capabilities",
-      "empty": "No image model configurations",
-      "addFirst": "Add First Image Model",
+      "empty": "No image connections yet",
+      "addFirst": "Add Image Connection",
       "staticLoaded": "Static models loaded",
       "noStaticModels": "No static models",
       "staticLoadFailed": "Failed to load static models",

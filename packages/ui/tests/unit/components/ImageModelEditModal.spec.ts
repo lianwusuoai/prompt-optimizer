@@ -172,7 +172,7 @@ describe('mobile image model editor draft lifecycle', () => {
       await flushPromises()
       expect(wrapper.emitted('update:show')).toEqual([[false]])
     } else {
-      expect(heading.text()).toBe('Edit')
+      expect(heading.text()).toBe('Edit Connection')
     }
     wrapper.unmount()
   })

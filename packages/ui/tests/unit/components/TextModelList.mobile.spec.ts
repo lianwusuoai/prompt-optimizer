@@ -17,11 +17,11 @@ const models = [
   { id: 'custom', name: 'My mobile model', enabled: false, providerMeta: { id: 'custom-provider', name: 'Team endpoint' }, modelMeta: { id: 'team-model-c', name: 'Model C' } },
 ] as TextModelConfig[]
 
-function renderList() {
+function renderList(items = models) {
   const compact = ref(true)
   layout.current = compact
   const wrapper = mount(TextModelList, {
-    props: { models, isTestingConnectionFor: () => false, isDefaultModel: id => id === 'builtin' },
+    props: { models: items, isTestingConnectionFor: () => false },
     global: { stubs: { MobileModelRow: Row, NInput: Input, NEmpty: true } },
   })
   return { wrapper, compact }
@@ -44,17 +44,20 @@ describe('mobile text model list', () => {
     wrapper.unmount()
   })
 
-  it('keeps direct edit/test actions and protects default models from deletion', async () => {
-    const { wrapper } = renderList()
-    const [builtin, custom] = wrapper.findAllComponents(Row)
-    expect(builtin.props('menuOptions').map((option: { key: string }) => option.key)).toEqual(['clone', 'disable'])
+  it('keeps shared edit/test actions and reserves account removal for subscription settings', async () => {
+    const { wrapper } = renderList([...models, { ...models[0], id: 'subscription', providerId: 'chatgpt-subscription' }])
+    const [builtin, custom, subscription] = wrapper.findAllComponents(Row)
+    expect(builtin.props('menuOptions').map((option: { key: string }) => option.key)).toEqual(['clone', 'disable', 'delete'])
     expect(custom.props('menuOptions').map((option: { key: string }) => option.key)).toEqual(['clone', 'enable', 'delete'])
+    expect(subscription.props('menuOptions').map((option: { key: string }) => option.key)).toEqual(['disable'])
     await custom.get('.edit').trigger('click')
     await custom.get('.test').trigger('click')
     expect(wrapper.emitted('edit')).toEqual([['custom']])
     expect(wrapper.emitted('test')).toEqual([['custom']])
-    builtin.vm.$emit('action', 'delete')
+    subscription.vm.$emit('action', 'delete')
+    subscription.vm.$emit('action', 'clone')
     expect(wrapper.emitted('delete')).toBeUndefined()
+    expect(wrapper.emitted('clone')).toBeUndefined()
     custom.vm.$emit('action', 'delete')
     expect(wrapper.emitted('delete')).toEqual([['custom']])
     wrapper.unmount()

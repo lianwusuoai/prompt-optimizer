@@ -80,13 +80,59 @@ function createIpcError(payload) {
   return new Error(String(payload));
 }
 
-async function invokeFavorite(channel, ...args) {
+
+// Electron can deliver invoke replies before earlier webContents.send messages.
+async function receiveModelStream(callbacks, invoke, llm = false) {
+  const id = generateStreamId();
+  const delivered = Promise.withResolvers();
+  const listeners = new Map();
+  let completion;
+  let callbackError;
+  const listen = (type, callback) => {
+    if (!callback) return;
+    const channel = `stream-${type}-${id}`;
+    const listener = (_event, value) => {
+      try { callback(value); }
+      catch (error) { callbackError ??= error; }
+    };
+    listeners.set(channel, listener);
+    ipcRenderer.on(channel, listener);
+  };
+
+  callbacks?.onStart?.(id);
+  try {
+    listen(llm ? 'content' : 'token', llm ? callbacks?.onContent : callbacks?.onToken);
+    listen(llm ? 'thinking' : 'reasoning-token', llm ? callbacks?.onThinking : callbacks?.onReasoningToken);
+    listen('tool-call', callbacks?.onToolCall);
+    const finish = llm ? callbacks?.onFinish : callbacks?.onComplete;
+    listen('finish', response => {
+      completion = Promise.resolve(finish?.(response)).catch(error => { callbackError ??= error; });
+    });
+    listen('error', message => {
+      const error = new Error(message);
+      callbacks?.onError?.(error);
+      callbackError ??= error;
+    });
+    listen('end', delivered.resolve);
+    const reply = await invoke(id);
+    if (reply.streamEnded) await delivered.promise;
+    await completion;
+    if (!reply.success) throw createIpcError(reply.error);
+    if (callbackError) throw callbackError;
+  } finally {
+    for (const [channel, listener] of listeners) ipcRenderer.removeListener(channel, listener);
+  }
+}
+
+async function invokeResult(channel, ...args) {
   const result = await ipcRenderer.invoke(channel, ...args);
   if (!result.success) {
     throw createIpcError(result.error);
   }
   return result.data;
 }
+
+const invokeFavorite = invokeResult;
 
 let saveWorkspaceBeforeExit;
 ipcRenderer.on('workspace-save-request', async (_event, requestId) => {
@@ -101,6 +147,15 @@ ipcRenderer.on('workspace-save-request', async (_event, requestId) => {
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  chatgptSubscription: {
+    status: () => invokeResult('chatgpt-subscription', 'status'),
+    connect: newAccount => invokeResult('chatgpt-subscription', 'connect', newAccount === true),
+    cancel: () => invokeResult('chatgpt-subscription', 'cancel'),
+    refresh: () => invokeResult('chatgpt-subscription', 'refresh'),
+    disconnect: () => invokeResult('chatgpt-subscription', 'disconnect'),
+    acknowledge: () => invokeResult('chatgpt-subscription', 'acknowledge'),
+    manageUsage: () => invokeResult('chatgpt-subscription', 'manageUsage'),
+  },
   desktopResources: {
     register: () => ipcRenderer.invoke('desktop-resources-register'),
     complete: packet => ipcRenderer.invoke('desktop-resources-complete', packet),
@@ -134,8 +189,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // High-level LLM service interface
   llm: {
     // Test connection to a provider
-    testConnection: async (provider) => {
-      const result = await ipcRenderer.invoke('llm-testConnection', provider);
+    testConnection: async (provider, draft) => {
+      const result = await ipcRenderer.invoke('llm-testConnection', provider, draft);
       if (!result.success) {
         throw createIpcError(result.error);
       }
@@ -175,112 +230,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return result.data;
     },
 
-    // Send streaming message
-    sendMessageStream: async (messages, provider, callbacks, selection) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-      
-      // Set up event listeners for streaming responses
-      const contentListener = (event, content) => {
-        if (callbacks.onContent) callbacks.onContent(content);
-      };
-      const thinkingListener = (event, thinking) => {
-        if (callbacks.onThinking) callbacks.onThinking(thinking);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks.onFinish) callbacks.onFinish(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks.onError) callbacks.onError(new Error(error));
-      };
-
-      // Clean up listeners
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-content-${streamId}`, contentListener);
-        ipcRenderer.removeListener(`stream-thinking-${streamId}`, thinkingListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      // Register listeners
-      ipcRenderer.on(`stream-content-${streamId}`, contentListener);
-      ipcRenderer.on(`stream-thinking-${streamId}`, thinkingListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      // Send the streaming request
-      try {
-        const result = await ipcRenderer.invoke('llm-sendMessageStream', messages, provider, streamId, selection);
-        if (!result.success) {
-          cleanup();
-          throw createIpcError(result.error);
-        }
-      } catch (error) {
-        cleanup();
-        throw error;
-      } finally { cleanup(); }
-    },
-
-    // Send streaming message with tools (supports tool-call events)
-    sendMessageStreamWithTools: async (messages, provider, tools, callbacks) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      // Set up event listeners for streaming responses
-      const contentListener = (event, content) => {
-        if (callbacks.onContent) callbacks.onContent(content);
-      };
-      const thinkingListener = (event, thinking) => {
-        if (callbacks.onThinking) callbacks.onThinking(thinking);
-      };
-      const toolCallListener = (event, toolCall) => {
-        if (callbacks.onToolCall) callbacks.onToolCall(toolCall);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks.onFinish) callbacks.onFinish(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks.onError) callbacks.onError(new Error(error));
-      };
-
-      // Clean up listeners
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-content-${streamId}`, contentListener);
-        ipcRenderer.removeListener(`stream-thinking-${streamId}`, thinkingListener);
-        ipcRenderer.removeListener(`stream-tool-call-${streamId}`, toolCallListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      // Register listeners
-      ipcRenderer.on(`stream-content-${streamId}`, contentListener);
-      ipcRenderer.on(`stream-thinking-${streamId}`, thinkingListener);
-      ipcRenderer.on(`stream-tool-call-${streamId}`, toolCallListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      // Send the streaming request
-      try {
-        const result = await ipcRenderer.invoke(
-          'llm-sendMessageStreamWithTools',
-          messages,
-          provider,
-          tools,
-          streamId
-        );
-        if (!result.success) {
-          cleanup();
-          throw createIpcError(result.error);
-        }
-      } catch (error) {
-        cleanup();
-        throw error;
-      } finally { cleanup(); }
-    }
+    sendMessageStream: (messages, provider, callbacks, selection) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('llm-sendMessageStream', messages, provider, streamId, selection), true),
+    sendMessageStreamWithTools: (messages, provider, tools, callbacks) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('llm-sendMessageStreamWithTools', messages, provider, tools, streamId), true),
   },
 
   // Forward the full video IPC arguments, including the stored run identity for task lookups.
@@ -881,208 +836,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
       return result.data;
     },
-    // 统一的流式封装（与 llm.sendMessageStream 同模式）
-    optimizePromptStream: async (request, callbacks) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      const tokenListener = (event, token) => {
-        if (callbacks?.onToken) callbacks.onToken(token);
-      };
-      const reasoningListener = (event, token) => {
-        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks?.onComplete) callbacks.onComplete(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks?.onError) callbacks.onError(new Error(error));
-      };
-
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
-        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
-      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      try {
-const result = await ipcRenderer.invoke('prompt-optimizePromptStream', request, streamId);
-      if (!result.success) {
-        cleanup();
-        throw createIpcError(result.error);
-      }
-    } finally { cleanup(); }
-},
-    optimizeMessageStream: async (request, callbacks) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      const tokenListener = (event, token) => {
-        if (callbacks?.onToken) callbacks.onToken(token);
-      };
-      const reasoningListener = (event, token) => {
-        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks?.onComplete) callbacks.onComplete(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks?.onError) callbacks.onError(new Error(error));
-      };
-
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
-        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
-      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      try {
-const result = await ipcRenderer.invoke('prompt-optimizeMessageStream', request, streamId);
-      if (!result.success) {
-        cleanup();
-        throw createIpcError(result.error);
-      }
-    } finally { cleanup(); }
-},
-    iteratePromptStream: async (originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, callbacks, contextData) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      const tokenListener = (event, token) => {
-        if (callbacks?.onToken) callbacks.onToken(token);
-      };
-      const reasoningListener = (event, token) => {
-        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks?.onComplete) callbacks.onComplete(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks?.onError) callbacks.onError(new Error(error));
-      };
-
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
-        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
-      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      try {
-const result = await ipcRenderer.invoke('prompt-iteratePromptStream', originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, streamId, contextData);
-      if (!result.success) {
-        cleanup();
-        throw createIpcError(result.error);
-      }
-    } finally { cleanup(); }
-},
-    testPromptStream: async (systemPrompt, userPrompt, modelKey, callbacks, inputImages) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      const tokenListener = (event, token) => {
-        if (callbacks?.onToken) callbacks.onToken(token);
-      };
-      const reasoningListener = (event, token) => {
-        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks?.onComplete) callbacks.onComplete(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks?.onError) callbacks.onError(new Error(error));
-      };
-
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
-        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
-      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      try {
-const result = await ipcRenderer.invoke('prompt-testPromptStream', systemPrompt, userPrompt, modelKey, streamId, inputImages);
-      if (!result.success) {
-        cleanup();
-        throw createIpcError(result.error);
-      }
-    } finally { cleanup(); }
-},
-    // 自定义会话测试（支持工具调用）
-    testCustomConversationStream: async (request, callbacks) => {
-      const streamId = generateStreamId();
-      callbacks?.onStart?.(streamId);
-
-      const tokenListener = (event, token) => {
-        if (callbacks?.onToken) callbacks.onToken(token);
-      };
-      const reasoningListener = (event, token) => {
-        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
-      };
-      const toolCallListener = (event, toolCall) => {
-        if (callbacks?.onToolCall) callbacks.onToolCall(toolCall);
-      };
-      const finishListener = (_event, response) => {
-        cleanup();
-        if (callbacks?.onComplete) callbacks.onComplete(response);
-      };
-      const errorListener = (event, error) => {
-        cleanup();
-        if (callbacks?.onError) callbacks.onError(new Error(error));
-      };
-
-      const cleanup = () => {
-        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
-        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
-        ipcRenderer.removeListener(`stream-tool-call-${streamId}`, toolCallListener);
-        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
-        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
-      };
-
-      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
-      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
-      ipcRenderer.on(`stream-tool-call-${streamId}`, toolCallListener);
-      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
-      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
-
-      try {
-const result = await ipcRenderer.invoke('prompt-testCustomConversationStream', request, streamId);
-      if (!result.success) {
-        cleanup();
-        throw createIpcError(result.error);
-      }
-    } finally { cleanup(); }
-},
+    optimizePromptStream: (request, callbacks) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('prompt-optimizePromptStream', request, streamId)),
+    optimizeMessageStream: (request, callbacks) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('prompt-optimizeMessageStream', request, streamId)),
+    iteratePromptStream: (originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, callbacks, contextData) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('prompt-iteratePromptStream', originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, streamId, contextData)),
+    testPromptStream: (systemPrompt, userPrompt, modelKey, callbacks, inputImages) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('prompt-testPromptStream', systemPrompt, userPrompt, modelKey, streamId, inputImages)),
+    testCustomConversationStream: (request, callbacks) =>
+      receiveModelStream(callbacks, streamId =>
+        ipcRenderer.invoke('prompt-testCustomConversationStream', request, streamId)),
     iteratePrompt: async (originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, contextData) => {
       const result = await ipcRenderer.invoke('prompt-iteratePrompt', originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, contextData);
       if (!result.success) {

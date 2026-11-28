@@ -69,9 +69,9 @@ const IMAGE_REQUIRED_CONNECTION_FIELDS: Record<string, string[]> = {
   cloudflare: ['apiKey', 'accountId']
 }
 
-function getFirstEnvValue(envKeys: readonly string[]): string {
+function getFirstEnvValue(envKeys: readonly string[], readEnv: typeof getEnvVar): string {
   for (const envKey of envKeys) {
-    const value = getEnvVar(envKey).trim()
+    const value = readEnv(envKey).trim()
     if (value) return value
   }
   return ''
@@ -98,7 +98,7 @@ function shouldEnableFromRequiredFields(
  *
  * @param registry 可选，图像适配器注册表（用于依赖注入和测试）
  */
-export function getDefaultImageModels(registry?: IImageAdapterRegistry): Record<string, ImageModelConfig> {
+export function getDefaultImageModels(registry?: IImageAdapterRegistry, readEnv = getEnvVar): Record<string, ImageModelConfig> {
   const adapterRegistry = registry || new ImageAdapterRegistry()
   const result: Record<string, ImageModelConfig> = {}
 
@@ -114,16 +114,16 @@ export function getDefaultImageModels(registry?: IImageAdapterRegistry): Record<
       || adapter.buildDefaultModel(builtinConfig.modelId || providerId)
 
     // 获取 API Key（支持备选环境变量）
-    const apiKey = getFirstEnvValue(envKeys)
+    const apiKey = getFirstEnvValue(envKeys, readEnv)
 
     // 获取 baseURL（支持环境变量覆盖）
     let baseURL = provider.defaultBaseURL || ''
     const baseURLEnvKey = IMAGE_BASE_URL_ENV_KEYS[providerId]
     if (baseURLEnvKey) {
-      let envBaseURL = getEnvVar(baseURLEnvKey).trim()
+      let envBaseURL = readEnv(baseURLEnvKey).trim()
       // Seedream 备选
       if (!envBaseURL && providerId === 'seedream') {
-        envBaseURL = getEnvVar('VITE_ARK_BASE_URL').trim()
+        envBaseURL = readEnv('VITE_ARK_BASE_URL').trim()
       }
       if (envBaseURL) baseURL = envBaseURL
     }
@@ -134,7 +134,7 @@ export function getDefaultImageModels(registry?: IImageAdapterRegistry): Record<
     const extraConnectionFields = IMAGE_EXTRA_CONNECTION_ENV_KEYS[providerId] || {}
 
     for (const [field, fieldEnvKeys] of Object.entries(extraConnectionFields)) {
-      connectionConfig[field] = getFirstEnvValue(fieldEnvKeys)
+      connectionConfig[field] = getFirstEnvValue(fieldEnvKeys, readEnv)
     }
 
     const requiredConnectionFields = IMAGE_REQUIRED_CONNECTION_FIELDS[providerId] || ['apiKey']

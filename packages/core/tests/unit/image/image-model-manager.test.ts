@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CORE_SERVICE_KEYS } from '../../../src/constants/storage-keys'
 import { ImageAdapterRegistry } from '../../../src/services/image/adapters/registry'
+import { getDefaultImageModels } from '../../../src/services/image-model/defaults'
 import { ImageModelManager } from '../../../src/services/image-model/manager'
 import type { ImageModelConfig } from '../../../src/services/image/types'
 import { MemoryStorageProvider } from '../../../src/services/storage/memoryStorageProvider'
@@ -73,8 +74,8 @@ describe('ImageModelManager initialization behavior', () => {
 
   it('should refresh stored static model metadata to the latest adapter capabilities', async () => {
     await modelManager.ensureInitialized()
-    const existing = await modelManager.getConfig('image-seedream')
-    expect(existing).toBeDefined()
+    const existing = getDefaultImageModels(registry, () => '')['image-seedream']
+    await storageProvider.setItem(CORE_SERVICE_KEYS.IMAGE_MODELS, JSON.stringify({ [existing.id]: existing }))
 
     const storedSeedream: ImageModelConfig = {
       ...existing!,
@@ -100,22 +101,15 @@ describe('ImageModelManager initialization behavior', () => {
 
   it('should migrate exact legacy builtin image model ids', async () => {
     await modelManager.ensureInitialized()
+    const presets = getDefaultImageModels(registry, () => '')
     const defaults = {
-      openrouter: await modelManager.getConfig('image-openrouter-nanobanana'),
-      gemini: await modelManager.getConfig('image-gemini-nanobanana'),
-      openai: await modelManager.getConfig('image-openai-gpt'),
-      dashscope: await modelManager.getConfig('image-dashscope'),
-      seedream: await modelManager.getConfig('image-seedream-50-lite'),
-      grok: await modelManager.getConfig('image-grok-imagine')
+      openrouter: presets['image-openrouter-nanobanana'],
+      gemini: presets['image-gemini-nanobanana'],
+      openai: presets['image-openai-gpt'],
+      dashscope: presets['image-dashscope'],
+      seedream: presets['image-seedream-50-lite'],
+      grok: presets['image-grok-imagine'],
     }
-    expect(
-      defaults.openrouter
-      && defaults.gemini
-      && defaults.openai
-      && defaults.dashscope
-      && defaults.seedream
-      && defaults.grok
-    ).toBeTruthy()
 
     await storageProvider.setItem(CORE_SERVICE_KEYS.IMAGE_MODELS, JSON.stringify({
       'image-openrouter-nanobanana': {
@@ -163,8 +157,8 @@ describe('ImageModelManager initialization behavior', () => {
 
   it('should refresh embedded provider and model metadata when providerId/modelId are updated directly', async () => {
     await modelManager.ensureInitialized()
-    const existing = await modelManager.getConfig('image-seedream')
-    expect(existing).toBeDefined()
+    const existing = getDefaultImageModels(registry, () => '')['image-seedream']
+    await storageProvider.setItem(CORE_SERVICE_KEYS.IMAGE_MODELS, JSON.stringify({ [existing.id]: existing }))
     expect(existing?.providerId).toBe('seedream')
 
     await modelManager.updateConfig(existing!.id, {
@@ -256,8 +250,8 @@ describe('ImageModelManager initialization behavior', () => {
 
   it('should infer identity from legacy provider/model snapshots on read', async () => {
     await modelManager.ensureInitialized()
-    const existing = await modelManager.getConfig('image-seedream')
-    expect(existing).toBeDefined()
+    const existing = getDefaultImageModels(registry, () => '')['image-seedream']
+    await storageProvider.setItem(CORE_SERVICE_KEYS.IMAGE_MODELS, JSON.stringify({ [existing.id]: existing }))
 
     const legacySnapshot = {
       ...existing!,
@@ -280,8 +274,8 @@ describe('ImageModelManager initialization behavior', () => {
 
   it('should export legacy provider/model snapshots with repaired identity fields', async () => {
     await modelManager.ensureInitialized()
-    const existing = await modelManager.getConfig('image-seedream')
-    expect(existing).toBeDefined()
+    const existing = getDefaultImageModels(registry, () => '')['image-seedream']
+    await storageProvider.setItem(CORE_SERVICE_KEYS.IMAGE_MODELS, JSON.stringify({ [existing.id]: existing }))
 
     const legacySnapshot = {
       ...existing!,

@@ -131,7 +131,7 @@ type LlmStreamCallbacks = {
 }
 
 interface LlmAPI {
-  testConnection(provider: string): Promise<void>
+  testConnection: import('@prompt-optimizer/core').ILLMService['testConnection']
   sendMessage(messages: unknown[], provider: string): Promise<string>
   sendMessageStructured(messages: unknown[], provider: string): Promise<unknown>
   sendVideoUnderstanding: import('@prompt-optimizer/core').ILLMService['sendVideoUnderstanding']
@@ -220,7 +220,27 @@ interface DataAPI {
 }
 
 // 完整的ElectronAPI接口
+export interface ChatGPTSubscriptionStatus {
+  status: 'disconnected' | 'signedOut' | 'needsConsent' | 'connected'
+  email: string
+  connectionRef?: string
+  count: number
+  synced: boolean
+  persistent: boolean
+  welcomed: boolean
+  revocationUnconfirmed?: boolean
+}
+
 interface ElectronAPI {
+  chatgptSubscription?: {
+    status(): Promise<ChatGPTSubscriptionStatus>
+    connect(newAccount?: boolean): Promise<ChatGPTSubscriptionStatus>
+    cancel(): Promise<void>
+    refresh(): Promise<ChatGPTSubscriptionStatus>
+    disconnect(): Promise<ChatGPTSubscriptionStatus>
+    acknowledge(): Promise<ChatGPTSubscriptionStatus>
+    manageUsage(): Promise<void>
+  }
   localServices?: {
     fetchModels(input: import('@prompt-optimizer/core').LocalServiceModelRequest): Promise<import('@prompt-optimizer/core').ModelOption[]>
     discover(ports?: import('@prompt-optimizer/core').LocalDiscoveryPorts): Promise<import('@prompt-optimizer/core').LocalServiceResult[]>

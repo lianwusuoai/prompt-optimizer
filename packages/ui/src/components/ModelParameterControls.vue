@@ -1,6 +1,7 @@
 <template>
   <span v-if="presentation === 'summary'" class="model-parameter-summary" :title="summary">{{ summary }}</span>
   <div v-else class="local-model-parameters" role="group" :aria-label="t('localParameters.title')" :style="{ '--parameter-label': theme.textColor2 }">
+    <small class="local-model-parameters__scope">{{ t('localParameters.scope') }}</small>
     <div v-if="hasReasoningControl" class="local-model-parameters__quick">
       <span>{{ t(effortDefinition ? 'localParameters.reasoning' : 'localParameters.thinking') }}</span>
       <NSelect :value="reasoningSelection" :options="reasoningChoices" :disabled="disabled" size="small" :to="false"
@@ -198,6 +199,7 @@ watch(() => props.modelKey, () => { advancedOpen.value = false })
 </script>
 
 <style scoped>
+.local-model-parameters__scope { color: var(--local-muted, inherit); font-size: 12px; }
 .model-parameter-summary { white-space: nowrap; }
 .local-model-parameters { min-width: 0; }
 .local-model-parameters__quick { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 8px; font-size: 13px; }

@@ -51,6 +51,18 @@ export class LocalStorageProvider implements IStorageProvider {
     }
   }
 
+  public async getEntriesByPrefix(prefix: string): Promise<Array<[string, string]>> {
+    const entries: Array<[string, string]> = [];
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(prefix)) {
+        const value = localStorage.getItem(key);
+        if (value !== null) entries.push([key, value]);
+      }
+    }
+    return entries;
+  }
+
   public async setItem(key: string, value: string): Promise<void> {
     const release = await this.lock.acquire(key);
     try {

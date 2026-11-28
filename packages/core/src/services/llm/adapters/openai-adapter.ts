@@ -436,7 +436,7 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
     return `data:${image.mimeType || 'image/png'};base64,${imageData}`
   }
 
-  private buildResponsesImageUnderstandingInput(
+  protected buildResponsesImageUnderstandingInput(
     request: ImageUnderstandingRequest
   ): any[] {
     const input: any[] = []
@@ -560,19 +560,27 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
     const stream = callbacks.signal
         ? await openai.responses.create(responsesConfig, { signal: callbacks.signal })
         : await openai.responses.create(responsesConfig)
+    await this.consumeResponsesStream(stream, config.modelMeta.id, callbacks)
+  }
+
+  protected async consumeResponsesStream(
+    stream: AsyncIterable<any>, modelId: string, callbacks: StreamHandlers, requireCompleted = false
+  ): Promise<void> {
+    let completed = false
     let accumulatedContent = ''
     let accumulatedReasoning = ''
     let usage: LLMTokenUsage | undefined
     const thinkState = { isInThinkMode: false, buffer: '' }
     const toolCalls = new Map<number, any>()
 
-    for await (const event of stream as any) {
+    for await (const event of stream) {
       if (
         event &&
         typeof event === 'object' &&
         !('type' in event) &&
         typeof event.message === 'string'
       ) {
+        if (requireCompleted) throw Object.assign(new Error('Response failed'), { code: event.code })
         const providerErrorMessage = typeof event.code === 'string'
           ? `${event.code}: ${event.message}`
           : event.message
@@ -635,10 +643,11 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
           break
         }
         case 'response.completed': {
+          completed = true
           const completedResponse = event.response
           usage = normalizeResponsesUsage(completedResponse?.usage) ?? usage
-          if (!accumulatedContent && completedResponse?.output_text) {
-            accumulatedContent = completedResponse.output_text
+          if (!accumulatedContent) {
+            accumulatedContent = completedResponse?.output_text || this.extractResponsesText(completedResponse?.output)
           }
           if (!accumulatedReasoning) {
             accumulatedReasoning = this.extractResponsesReasoning(completedResponse?.output)
@@ -646,22 +655,32 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
           break
         }
         case 'response.failed': {
+          if (requireCompleted) throw Object.assign(new Error('Response failed'), { code: event.response?.error?.code })
           throw new APIError('Responses API request failed')
         }
+        case 'response.incomplete':
+          if (requireCompleted) throw new Error('chatgptSubscription.incomplete')
+          break
+        case 'error':
+          if (requireCompleted) throw Object.assign(new Error('Response failed'), { code: event.code || event.error?.code })
+          break
         case 'response.error': {
+          if (requireCompleted) throw Object.assign(new Error('Response failed'), { code: event.error?.code })
           throw new APIError(event.error?.message || 'Responses API request failed')
         }
         default:
           break
       }
+      if (requireCompleted && completed) break
     }
 
+    if (requireCompleted && !completed) throw new Error('chatgptSubscription.incomplete')
     await callbacks.onComplete({
       content: accumulatedContent,
       reasoning: accumulatedReasoning || undefined,
       toolCalls: toolCalls.size > 0 ? Array.from(toolCalls.values()) : undefined,
       metadata: {
-        model: config.modelMeta.id,
+        model: modelId,
         ...(usage ? { usage } : {})
       }
     })

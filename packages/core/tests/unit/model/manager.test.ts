@@ -5,7 +5,7 @@ import { TextModelConfig } from '../../../src/services/model/types';
 import { ModelConfigError } from '../../../src/services/llm/errors';
 import { MemoryStorageProvider } from '../../../src/services/storage/memoryStorageProvider';
 import { TextAdapterRegistry } from '../../../src/services/llm/adapters/registry';
-import { defaultModels } from '../../../src/services/model/defaults';
+import { getDefaultTextModels } from '../../../src/services/model/defaults';
 
 describe('ModelManager', () => {
   let modelManager: ModelManager;
@@ -50,6 +50,7 @@ describe('ModelManager', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     // 清理存储状态
     await storageProvider.clearAll();
   });
@@ -103,35 +104,30 @@ describe('ModelManager', () => {
       expect(result.some(m => m.id === 'testKey')).toBe(true);
     });
 
-    it('should return default models after initialization', async () => {
-      const result = await modelManager.getAllModels();
-      // 检查是否包含默认模型
-      expect(result.length).toBeGreaterThan(0);
-
-      // 检查是否包含一个已知的默认模型
-      const defaultKeys = Object.keys(defaultModels);
-      if (defaultKeys.length > 0) {
-        const firstDefaultKey = defaultKeys[0];
-        expect(result.some(m => m.id === firstDefaultKey)).toBe(true);
-      }
+    it('should return a built-in connection configured by the environment', async () => {
+      vi.stubEnv('VITE_OPENAI_API_KEY', 'fixture-openai-key');
+      const configuredManager = new ModelManager(new MemoryStorageProvider(), registry);
+      const result = await configuredManager.getAllModels();
+      expect(result.find(model => model.id === 'openai')).toMatchObject({
+        enabled: true, connectionConfig: { apiKey: 'fixture-openai-key' }
+      });
     });
   });
 
   describe('initialization behavior', () => {
     it('should migrate exact legacy builtin defaults while preserving connection settings', async () => {
-      const existing = await modelManager.getModel('openai')
-      expect(existing).toBeDefined()
+      const existing = createTextModelConfig('openai', 'OpenAI')
 
       const legacyOpenAI: TextModelConfig = {
-        ...existing!,
+        ...existing,
         modelId: 'gpt-5-mini',
         modelMeta: {
-          ...existing!.modelMeta,
+          ...existing.modelMeta,
           id: 'gpt-5-mini',
           name: 'GPT-5 Mini'
         },
         connectionConfig: {
-          ...existing!.connectionConfig,
+          ...existing.connectionConfig,
           baseURL: 'https://custom-openai.example/v1'
         }
       }
@@ -147,15 +143,14 @@ describe('ModelManager', () => {
     })
 
     it('should not migrate a legacy model id stored under a custom config key', async () => {
-      const existing = await modelManager.getModel('openai')
-      expect(existing).toBeDefined()
+      const existing = createTextModelConfig('openai', 'OpenAI')
       const custom = {
-        ...existing!,
+        ...existing,
         id: 'custom-openai-legacy',
         name: 'Custom Legacy OpenAI',
         modelId: 'gpt-5-mini',
         modelMeta: {
-          ...existing!.modelMeta,
+          ...existing.modelMeta,
           id: 'gpt-5-mini',
           name: 'GPT-5 Mini'
         }
@@ -174,8 +169,7 @@ describe('ModelManager', () => {
       process.env.VITE_GEMINI_API_KEY = 'env_gemini_key'
 
       try {
-        const existing = await modelManager.getModel('gemini')
-        expect(existing).toBeDefined()
+        const existing = getDefaultTextModels(undefined, () => '').gemini
 
         const storedGemini: TextModelConfig = {
           ...existing!,
@@ -209,8 +203,7 @@ describe('ModelManager', () => {
       process.env.VITE_CF_ACCOUNT_ID = 'env_cloudflare_account'
 
       try {
-        const existing = await modelManager.getModel('cloudflare')
-        expect(existing).toBeDefined()
+        const existing = getDefaultTextModels(undefined, () => '').cloudflare
 
         const storedCloudflare: TextModelConfig = {
           ...existing!,
@@ -247,16 +240,17 @@ describe('ModelManager', () => {
 
     it('should not overwrite existing model metadata or connection settings when reinitialized', async () => {
       const targetId = 'openai';
-      const existing = await modelManager.getModel(targetId);
-      expect(existing).toBeDefined();
+      const existing = createTextModelConfig(targetId, 'OpenAI');
+      await modelManager.ensureInitialized();
+      await storageProvider.setItem('models', JSON.stringify({ [targetId]: existing }));
 
       const customProviderMeta = {
-        ...existing!.providerMeta,
+        ...existing.providerMeta,
         name: 'Custom Provider Name'
       };
 
       const customModelMeta = {
-        ...existing!.modelMeta,
+        ...existing.modelMeta,
         id: 'custom-openai-model',
         name: 'Custom OpenAI Model'
       };
@@ -267,7 +261,7 @@ describe('ModelManager', () => {
         providerMeta: customProviderMeta,
         modelMeta: customModelMeta,
         connectionConfig: {
-          ...existing!.connectionConfig,
+          ...existing.connectionConfig,
           baseURL: customBaseURL
         }
       });
@@ -283,13 +277,12 @@ describe('ModelManager', () => {
     });
 
     it('should migrate builtin DeepSeek chat config to V4 Flash with thinking disabled', async () => {
-      const existing = await modelManager.getModel('deepseek')
-      expect(existing).toBeDefined()
+      const existing = createTextModelConfig('deepseek', 'DeepSeek', true, 'fixture-deepseek-key', 'deepseek')
 
       const legacyDeepseek: TextModelConfig = {
-        ...existing!,
+        ...existing,
         modelMeta: {
-          ...existing!.modelMeta,
+          ...existing.modelMeta,
           id: 'deepseek-chat',
           name: 'DeepSeek Chat',
           defaultParameterValues: {}
@@ -313,13 +306,12 @@ describe('ModelManager', () => {
     })
 
     it('should migrate builtin DeepSeek reasoner config to V4 Pro with thinking enabled', async () => {
-      const existing = await modelManager.getModel('deepseek')
-      expect(existing).toBeDefined()
+      const existing = createTextModelConfig('deepseek', 'DeepSeek', true, 'fixture-deepseek-key', 'deepseek')
 
       const legacyDeepseekReasoner: TextModelConfig = {
-        ...existing!,
+        ...existing,
         modelMeta: {
-          ...existing!.modelMeta,
+          ...existing.modelMeta,
           id: 'deepseek-reasoner',
           name: 'DeepSeek Reasoner',
           defaultParameterValues: {}
@@ -340,16 +332,15 @@ describe('ModelManager', () => {
     })
 
     it('should preserve custom DeepSeek model id while patching DeepSeek parameters', async () => {
-      const existing = await modelManager.getModel('deepseek')
-      expect(existing).toBeDefined()
+      const existing = createTextModelConfig('deepseek', 'DeepSeek', true, 'fixture-deepseek-key', 'deepseek')
 
       const customDeepseek: TextModelConfig = {
-        ...existing!,
+        ...existing,
         id: 'custom-deepseek',
         name: 'Custom DeepSeek',
         modelId: 'custom-deepseek-model',
         modelMeta: {
-          ...existing!.modelMeta,
+          ...existing.modelMeta,
           id: 'custom-deepseek-model',
           name: 'Custom DeepSeek Model',
           parameterDefinitions: [],

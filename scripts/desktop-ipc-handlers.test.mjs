@@ -60,7 +60,9 @@ test('desktop Arena streams forward request-local selection and preserve cancell
   const selection = { modelId: 'actual-model' }
   let released = false
   const signal = new AbortController().signal
-  const invoke = vm.runInNewContext(`(${match[1]}\n})`, {
+  const endModelStream = main.match(/function endModelStream\(sender, streamId, reply\) \{[\s\S]*?\n\}/)
+  assert.ok(endModelStream)
+  const invoke = vm.runInNewContext(`${endModelStream[0]}\n(${match[1]}\n})`, {
     streamRegistry: { begin: () => ({ signal, release: () => { released = true } }) },
     llmService: { sendMessageStream: async (_messages, configKey, callbacks, requestSelection) => {
       assert.equal(configKey, 'saved-connection')
@@ -70,9 +72,38 @@ test('desktop Arena streams forward request-local selection and preserve cancell
     createSuccessResponse: () => ({ success: true }),
     createErrorResponse: error => { throw error },
   })
-  assert.equal((await invoke({ sender: {} }, [], 'saved-connection', 'run-id', selection)).success, true)
+  const delivered = []
+  const sender = { isDestroyed: () => false, send: channel => delivered.push(channel) }
+  const reply = await invoke({ sender }, [], 'saved-connection', 'run-id', selection)
+  assert.equal(reply.success, true)
+  assert.equal(reply.streamEnded, true)
+  assert.deepEqual(delivered, ['stream-end-run-id'])
   assert.equal(released, true)
   assert.match(readText('packages/desktop/preload.js'), /ipcRenderer\.invoke\('llm-sendMessageStream', messages, provider, streamId, selection\)/)
+})
+
+test('desktop connection tests forward the draft model and parameters through preload and main', async () => {
+  const main = readText('packages/desktop/main.js')
+  const start = main.indexOf("ipcMain.handle('llm-testConnection'")
+  const source = main.slice(start, main.indexOf('\n  }, true));', start) + '\n  }, true));'.length)
+  const handlers = new Map()
+  const calls = []
+  vm.runInNewContext(source, {
+    ipcMain: { handle: (key, handler) => handlers.set(key, handler) },
+    withModelNetwork: handler => handler,
+    llmService: { testConnection: async (...args) => calls.push(args) },
+    createSuccessResponse: data => ({ success: true, data }),
+  })
+  let api
+  const contextBridge = { exposeInMainWorld: (_key, value) => { api = value } }
+  const ipcRenderer = new EventEmitter()
+  ipcRenderer.invoke = (key, ...args) => handlers.get(key)(null, ...args)
+  vm.runInNewContext(readText('packages/desktop/preload.js'), { require: () => ({ contextBridge, ipcRenderer }), process })
+  const connection = 'chatgpt-subscription:fixture'
+  const draft = { modelId: 'other-model', paramOverrides: { reasoning_effort: 'low' } }
+  await api.llm.testConnection(connection)
+  await api.llm.testConnection(connection, draft)
+  assert.deepEqual(calls, [[connection, undefined], [connection, draft]])
 })
 
 test('desktop video understanding forwards the source and chosen model and returns provider errors', async () => {
@@ -102,6 +133,36 @@ test('desktop video understanding forwards the source and chosen model and retur
   assert.equal((await api.llm.sendVideoUnderstanding(request, 'chosen-model')).content, 'generated prompt')
   await assert.rejects(api.llm.sendVideoUnderstanding(request, 'chosen-model'), /Provider rejected the video/)
   assert.deepEqual(calls, [[request, 'chosen-model'], [request, 'chosen-model']])
+})
+
+test('desktop comparison streams deliver every queued event even when invoke replies arrive first', async () => {
+  const ipcRenderer = new EventEmitter()
+  let api
+  const contextBridge = { exposeInMainWorld: (_name, exported) => { api = exported } }
+  vm.runInNewContext(readText('packages/desktop/preload.js'), { require: () => ({ contextBridge, ipcRenderer }), process })
+  const ids = []
+  ipcRenderer.invoke = async (_channel, _system, _user, _model, id) => {
+    ids.push(id)
+    return { success: true, streamEnded: true }
+  }
+  const outputs = [[], []]
+  const promises = outputs.map((output, index) =>
+    api.prompt.testPromptStream('system', 'user', 'model', {
+      onToken: text => output.push(text),
+      onComplete: result => output.push(result.content),
+    }).then(() => output.push('finished ' + index)))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(outputs, [[], []])
+  for (const i of [1, 0]) {
+    ipcRenderer.emit('stream-token-' + ids[i], null, 'delta ' + i)
+    ipcRenderer.emit('stream-finish-' + ids[i], null, { content: 'result ' + i })
+    ipcRenderer.emit('stream-end-' + ids[i])
+  }
+  await Promise.all(promises)
+  assert.deepEqual(outputs, [['delta 0', 'result 0', 'finished 0'], ['delta 1', 'result 1', 'finished 1']])
+  ipcRenderer.invoke = async () => ({ success: false, error: 'disconnected' })
+  await assert.rejects(api.prompt.testPromptStream('system', 'user', 'model', {}), /disconnected/)
+  assert.deepEqual(ipcRenderer.eventNames().filter(name => name.startsWith('stream-')), [])
 })
 
 test('desktop backup restore acknowledges success only after the final disk flush', async () => {

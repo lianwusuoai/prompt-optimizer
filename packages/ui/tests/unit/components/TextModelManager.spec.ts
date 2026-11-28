@@ -90,3 +90,36 @@ describe('Chrome placeholder visibility', () => {
     wrapper.unmount()
   })
 })
+
+it('offers the shared edit and test actions once for the authorized subscription', async () => {
+  const providerId = 'chatgpt-subscription'
+  const connection = {
+    id: providerId + ':current', name: 'Work plan', enabled: true, providerId,
+    providerMeta: { id: providerId, name: 'ChatGPT' }, modelMeta: { id: 'a', name: 'Text A' },
+    connectionConfig: { subscriptionRef: 'current' },
+  }
+  vi.stubGlobal('electronAPI', { chatgptSubscription: { status: async () => ({
+    status: 'connected', connectionRef: 'current', email: 'work@example.test', synced: true, count: 2, welcomed: true, persistent: true,
+  }) } })
+  manager.current = {
+    models: ref([connection, { ...connection, id: providerId + ':other', connectionConfig: { subscriptionRef: 'other' } }]),
+    testingConnections: ref({}), cancelLocalModelRequest: vi.fn(), loadModels: vi.fn(), loadProviders: vi.fn(),
+    prepareForEdit: vi.fn(), testConfigConnection: vi.fn(),
+  }
+  const wrapper = mount(TextModelManager, { props: { active: true }, global: { stubs: { LocalServiceDiscovery: true, TextModelEditModal: true } } })
+  try {
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid^="text-model-row-"]')
+    expect(rows).toHaveLength(1)
+    const row = rows[0]
+    expect(row.text()).toContain('work@example.test')
+    expect(wrapper.find('[data-testid="chatgpt-subscription"]').exists()).toBe(false)
+    expect(row.find('button[aria-label="Duplicate"]').exists()).toBe(false)
+    await row.get('button[aria-label="Test Connection"]').trigger('click')
+    expect(manager.current.testConfigConnection).toHaveBeenCalledWith(connection.id)
+    await row.get('button[aria-label="Edit"]').trigger('click')
+    await flushPromises()
+    expect(manager.current.prepareForEdit).toHaveBeenCalledWith(connection.id, true)
+    expect(wrapper.getComponent({ name: 'TextModelEditModal' }).props('show')).toBe(true)
+  } finally { wrapper.unmount(); vi.unstubAllGlobals() }
+})

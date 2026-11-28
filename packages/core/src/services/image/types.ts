@@ -41,6 +41,7 @@ export interface ImageModel {
 
 // 用户图像模型配置（Configuration层）
 export interface ImageModelConfig {
+  activationState?: { userConfigured?: boolean }
   id: string                             // 配置唯一标识
   name: string                           // 用户自定义名称
   providerId: string                     // 引用的 provider
@@ -152,6 +153,7 @@ export interface ImageProgressHandlers {
 // === 管理器接口 ===
 
 export interface IImageModelManager extends IImportExportable {
+  cleanupUnusedDefaults?(references?: unknown): Promise<void>
   // 初始化（写入默认配置/补齐缺失默认项）
   ensureInitialized?(): Promise<void>
   isInitialized?(): Promise<boolean>

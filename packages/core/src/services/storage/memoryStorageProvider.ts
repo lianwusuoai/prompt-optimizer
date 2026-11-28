@@ -8,6 +8,10 @@ import type { IStorageProvider } from './types';
 export class MemoryStorageProvider implements IStorageProvider {
   private storage = new Map<string, string>();
 
+  async getEntriesByPrefix(prefix: string): Promise<Array<[string, string]>> {
+    return Array.from(this.storage).filter(([key]) => key.startsWith(prefix));
+  }
+
   async compareAndSetItem(key: string, expected: string | null, value: string | null): Promise<boolean> {
     if ((this.storage.get(key) ?? null) !== expected) return false;
     if (value === null) this.storage.delete(key);

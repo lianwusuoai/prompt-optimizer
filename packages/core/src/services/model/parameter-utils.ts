@@ -294,6 +294,13 @@ export function validateOverrides({
   return { errors, warnings }
 }
 
+/** Retain settings that the newly selected model still accepts. */
+export function compatibleParameterOverrides(schema: readonly UnifiedParameterDefinition[], overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const { errors } = validateOverrides({ schema, overrides, allowUnknown: false })
+  const invalid = new Set(errors.map(error => error.parameterName))
+  return Object.fromEntries(Object.entries(overrides).filter(([name]) => !invalid.has(name)))
+}
+
 function shouldEmitValue(def: UnifiedParameterDefinition, value: unknown): boolean {
   if (value === undefined || value === null) {
     return false

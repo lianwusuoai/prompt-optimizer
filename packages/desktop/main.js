@@ -29,7 +29,9 @@ console.info('[prompt-optimizer/runtime]', {
   electron: process.versions.electron,
 });
 
-const { app, BrowserWindow, ipcMain, shell, session, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, Menu, nativeImage, dialog, safeStorage } = require('electron');
+const { ChatGPTSubscription } = require('./config/chatgpt-subscription');
+const { ChatGPTSessionStore } = require('./config/chatgpt-session-store');
 const { autoUpdater } = require('electron-updater');
 const { createShutdownController, createWillQuitStorageCloser, requestWorkspaceSave } = require('./config/shutdown');
 const {
@@ -87,6 +89,7 @@ require('dotenv').config({ path: envPath });
 const {
   PreferenceService,
   createModelManager,
+  TextAdapterRegistry,
   createVideoService,
   createTemplateManager,
   createHistoryManager,
@@ -127,6 +130,7 @@ const convertImageInputWithElectronNativeImage = createElectronImageInputConvert
 const safeSerialize = safeSerializeForIPC;
 
 let mainWindow;
+let chatgptSubscription;
 let networkSettingsStore;
 let modelNetwork;
 let networkRestarting = false;
@@ -643,7 +647,13 @@ async function initializeServices() {
     await initializePreferenceService(storageProvider);
     
     console.log('[DESKTOP] Creating model manager...');
-    modelManager = createModelManager(storageProvider);
+    chatgptSubscription = new ChatGPTSubscription({
+      store: new ChatGPTSessionStore(userDataPath, safeStorage),
+      openBrowser: url => shell.openExternal(url),
+      syncModels: (ref, models) => modelManager.syncSubscriptionModels(ref, models),
+    });
+    const textRegistry = new TextAdapterRegistry(chatgptSubscription);
+    modelManager = createModelManager(storageProvider, textRegistry);
     
     console.log('[DESKTOP] Creating template language service...');
     templateLanguageService = createTemplateLanguageService(preferenceService);
@@ -659,6 +669,11 @@ async function initializeServices() {
     
     console.log('[DESKTOP] Initializing model manager...');
     await modelManager.ensureInitialized();
+    try {
+      await chatgptSubscription.restore();
+    } catch {
+      console.warn('[Desktop] ChatGPT subscription could not be restored.');
+    }
     // 图像模型管理器
     console.log('[DESKTOP] Creating image model manager...');
     imageAdapterRegistry = createImageAdapterRegistry();
@@ -681,10 +696,11 @@ async function initializeServices() {
     undici.setGlobalDispatcher(modelNetwork);
 
     console.log('[DESKTOP] Creating LLM service...');
-    llmService = createLLMService(modelManager);
+    llmService = createLLMService(modelManager, textRegistry);
 
     console.log('[DESKTOP] Creating image understanding service...');
     imageUnderstandingService = createImageUnderstandingService({
+      registry: textRegistry,
       imageInputConverter: convertImageInputWithElectronNativeImage,
     });
 
@@ -738,6 +754,13 @@ async function initializeServices() {
 }
 
 // --- IPC Response Helpers ---
+// The renderer waits for this ordered event before releasing its per-stream listeners.
+function endModelStream(sender, streamId, reply) {
+  if (sender.isDestroyed()) return reply;
+  sender.send(`stream-end-${streamId}`);
+  return { ...reply, streamEnded: true };
+}
+
 function createSuccessResponse(data) {
   return { success: true, data };
 }
@@ -925,9 +948,32 @@ function setupIPC() {
   });
   
   // LLM Service handlers
-  ipcMain.handle('llm-testConnection', withModelNetwork(async (event, provider) => {
+  ipcMain.handle('chatgpt-subscription', withModelNetwork(async (event, action, newAccount) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) {
+      return createErrorResponse(new Error('chatgptSubscription.authorizationFailed'));
+    }
     try {
-      await llmService.testConnection(provider);
+      let result;
+      switch (action) {
+        case 'status': result = await chatgptSubscription.status(); break;
+        case 'connect': result = await chatgptSubscription.connect(newAccount === true); break;
+        case 'cancel': chatgptSubscription.cancel(); break;
+        case 'refresh': result = await chatgptSubscription.refresh(); break;
+        case 'disconnect': result = await chatgptSubscription.disconnect(); break;
+        case 'acknowledge': result = await chatgptSubscription.acknowledge(); break;
+        case 'manageUsage': await shell.openExternal('https://chatgpt.com/settings/usage'); break;
+        default: throw new Error('chatgptSubscription.authorizationFailed');
+      }
+      return createSuccessResponse(result);
+    } catch (error) {
+      const code = /^chatgptSubscription\.[A-Za-z]+$/.test(error?.message) ? error.message : 'chatgptSubscription.authorizationFailed';
+      return createErrorResponse(Object.assign(new Error(code), { code }));
+    }
+  }));
+
+  ipcMain.handle('llm-testConnection', withModelNetwork(async (event, provider, draft) => {
+    try {
+      await llmService.testConnection(provider, draft);
       return createSuccessResponse(null);
     } catch (error) {
       return createErrorResponse(error);
@@ -1025,9 +1071,9 @@ function setupIPC() {
       };
 
       await llmService.sendMessageStream(messages, provider, callbacks, selection);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     } finally { lease.release(); }
   }));
 
@@ -1065,9 +1111,9 @@ function setupIPC() {
       };
 
       await llmService.sendMessageStreamWithTools(messages, provider, tools, callbacks);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     } finally { lease.release(); }
   }));
 
@@ -1172,10 +1218,10 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(event.sender, streamId);
     try {
       await promptService.optimizePromptStream(request, streamHandlers);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
       streamHandlers.onError(error);
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     }
   }));
 
@@ -1183,10 +1229,10 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(event.sender, streamId);
     try {
       await promptService.optimizeMessageStream(request, streamHandlers);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
       streamHandlers.onError(error);
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     }
   }));
 
@@ -1194,10 +1240,10 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(event.sender, streamId);
     try {
       await promptService.iteratePromptStream(originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, streamHandlers, templateId, contextData);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
       streamHandlers.onError(error);
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     }
   }));
 
@@ -1205,10 +1251,10 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(event.sender, streamId);
     try {
       await promptService.testPromptStream(systemPrompt, userPrompt, modelKey, streamHandlers, inputImages);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
       streamHandlers.onError(error);
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     }
   }));
 
@@ -1217,10 +1263,10 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(event.sender, streamId);
     try {
       await promptService.testCustomConversationStream(request, streamHandlers);
-      return createSuccessResponse(null);
+      return endModelStream(event.sender, streamId, createSuccessResponse(null));
     } catch (error) {
       streamHandlers.onError(error);
-      return createErrorResponse(error);
+      return endModelStream(event.sender, streamId, createErrorResponse(error));
     }
   }));
 
@@ -2451,6 +2497,7 @@ process.on('SIGTERM', () => {
 // 全局异常处理已在 console-logger 中设置
 
 app.on('before-quit', shutdown.onQuit);
+app.on('will-quit', () => { chatgptSubscription?.cancel(); chatgptSubscription?.invalidate(); });
 
 // Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', function () {

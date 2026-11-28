@@ -71,27 +71,9 @@
   <NCollapse v-else v-model:expanded-names="expandedNames" class="model-advanced-section" :class="{ 'model-advanced-section--compact': isCompact }">
     <NCollapseItem name="advanced">
       <template #header>
-        <NSpace vertical :size="4" class="advanced-header">
-          <NSpace align="center" :size="8">
-            <NH4 style="margin: 0; font-size: 14px;">
-              {{ t('modelManager.advancedParameters.title') }}
-            </NH4>
-            <NTag v-if="!isCompact" type="default" size="small" :bordered="false">
-              {{ providerDisplay }}
-            </NTag>
-          </NSpace>
-          <NText v-if="!isCompact" depth="3" style="font-size: 12px;">
-            <span>{{ t('modelManager.advancedParameters.currentProvider') }}:</span>
-            <NText strong>
-              {{ providerDisplay }}
-            </NText>
-            <span v-if="availableCount > 0">
-              ({{ availableCount }}{{ t('modelManager.advancedParameters.availableParams') }})
-            </span>
-            <NText v-else type="warning">
-              ({{ t('modelManager.advancedParameters.noAvailableParams') }})
-            </NText>
-          </NText>
+        <NSpace align="center" :size="8">
+          <NText strong>{{ t('modelManager.advancedParameters.title') }}</NText>
+          <NText v-if="configuredCount" depth="3">{{ t('modelManager.advancedParameters.configuredCount', { count: configuredCount }) }}</NText>
         </NSpace>
       </template>
       <template #header-extra>
@@ -130,9 +112,7 @@ import {
   NCollapseItem,
   NDropdown,
   NSpace,
-  NTag,
   NText,
-  NH4,
   NModal,
   NFormItem,
   NInput,
@@ -213,7 +193,7 @@ const availableDefinitions = computed(() =>
   )
 )
 
-const availableCount = computed(() => availableDefinitions.value.length)
+const configuredCount = computed(() => Object.keys(props.paramOverrides).length)
 
 const dropdownOptions = computed(() => {
   const base = availableDefinitions.value.map((def) => ({
@@ -229,14 +209,6 @@ const dropdownOptions = computed(() => {
   }
 
   return base
-})
-
-const providerDisplay = computed(() => {
-  if (!props.providerType) return t('modelManager.advancedParameters.customProvider')
-  if (props.providerType === 'custom') {
-    return t('modelManager.advancedParameters.customProvider')
-  }
-  return props.providerType.toUpperCase()
 })
 
 const emitParamOverrides = (value: Record<string, unknown>) => {

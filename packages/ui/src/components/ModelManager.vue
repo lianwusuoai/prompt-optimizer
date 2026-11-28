@@ -16,6 +16,16 @@
         <NButton v-if="hasDesktopNetwork" @click="showNetworkSettings = true" style="margin-right: 12px" data-testid="network-settings-open">
           {{ t('networkSettings.title') }}
         </NButton>
+        <NTooltip v-if="activeTab === 'text' && showSubscriptionShortcut" trigger="manual" :show="shortcutHint">
+          <template #trigger>
+            <NButton quaternary circle class="subscription-shortcut" :aria-label="t('chatgptSubscription.connect')"
+              data-testid="chatgpt-subscription-shortcut" @mouseenter="shortcutHint = true" @mouseleave="shortcutHint = false"
+              @focus="shortcutHint = true" @blur="shortcutHint = false" @click="textManagerRef?.openSubscription()">
+              <span class="subscription-shortcut-logo"><img :src="chatgptLogo" width="17" height="17" alt="" /></span>
+            </NButton>
+          </template>
+          {{ t('chatgptSubscription.connect') }}
+        </NTooltip>
         <NButton
           v-if="activeTab === 'text'"
           type="primary"
@@ -57,7 +67,7 @@
             v-for="tab in modelTabs"
             :key="tab.name"
             :name="tab.name"
-            :tab="t(isCompact ? tab.compactLabel : tab.label)"
+            :tab="t(isCompact && tab.compactLabel ? tab.compactLabel : tab.label)"
             :tab-props="{ 'aria-label': t(tab.label) }"
           />
         </NTabs>
@@ -76,6 +86,7 @@
                 :active="show && activeTab === 'text'"
                 ref="textManagerRef"
                 @models-updated="handleTextModelsUpdated"
+                @subscription-availability="showSubscriptionShortcut = !$event"
               />
               <ImageModelManager
                 v-show="activeTab === 'image'"
@@ -108,12 +119,13 @@
 </template>
 
 <script setup lang="ts">
+import chatgptLogo from '../assets/chatgpt-logo-white.svg'
 import { FilePlus2 as UiFilePlus2 } from '@lucide/vue'
 import NModal from "./common/AdaptiveModal.vue"
 import { inject, nextTick, onMounted, onUnmounted, provide, ref, watch, type Ref } from 'vue'
 
 import { useI18n } from 'vue-i18n'
-import { NButton, NCard,  NTabs, NTabPane } from 'naive-ui'
+import { NButton, NCard, NTooltip, NTabs, NTabPane } from 'naive-ui'
 import type { ImageModelConfig } from '@prompt-optimizer/core'
 import ImageModelEditModal from './ImageModelEditModal.vue'
 import VideoModelPanel from './video-mode/VideoModelPanel.vue'
@@ -141,9 +153,9 @@ const { isCompact } = useWorkspaceLayout()
 
 const extension = isVideoExtension()
 const modelTabs = [
-  { name: 'text', label: 'modelManager.textModels', compactLabel: 'common.text' },
-  { name: 'image', label: 'modelManager.imageModels', compactLabel: 'nav.imageMode' },
-  { name: 'video', label: 'video.models', compactLabel: 'nav.videoMode' },
+  { name: 'text', label: 'modelManager.textModels' },
+  { name: 'image', label: 'modelManager.imageModels' },
+  { name: 'video', label: 'modelManager.videoConnections' },
   { name: 'function', label: 'modelManager.functionModels', compactLabel: 'modelManager.functions' },
 ].filter(tab => tab.name !== 'video' || !extension)
 const activeTab = ref<'text' | 'image' | 'video' | 'function'>('text')
@@ -157,6 +169,8 @@ watch(activeTab, async (tab, previous) => {
     scrollAreaRef.value.scrollTop = compactScrollTop[tab]
   }
 }, { flush: 'pre' })
+const showSubscriptionShortcut = ref(false)
+const shortcutHint = ref(false)
 const hasDesktopNetwork = typeof window !== 'undefined' && !!window.electronAPI?.network
 const showNetworkSettings = ref(false)
 const textManagerRef = ref<InstanceType<typeof TextModelManager> | null>(null)
@@ -176,7 +190,13 @@ const openVideoModel = async (id: string) => {
   await nextTick()
   await videoListRef.value?.openEdit(id)
 }
-defineExpose({ openTextModel, openImageModel, openVideoModel })
+const openAddConnection = async (tab: 'text' | 'image' | 'video') => {
+  activeTab.value = tab
+  await nextTick()
+  if (tab === 'video') return videoListRef.value?.openAdd()
+  return openAddForActiveTab()
+}
+defineExpose({ openTextModel, openImageModel, openVideoModel, openAddConnection })
 const imageListRef = ref<InstanceType<typeof ImageModelManager> | null>(null)
 const functionManagerRef = ref<InstanceType<typeof FunctionModelManager> | null>(null)
 const showImageModelEdit = ref(false)
@@ -266,6 +286,8 @@ if (typeof window !== 'undefined') {
 </script>
 
 <style scoped>
+.subscription-shortcut { margin-inline-end: 6px; }
+.subscription-shortcut-logo { display: grid; place-items: center; background: #171717; border-radius: 50%; height: 27px; width: 27px; }
 .model-manager-content {
   flex: 1;
   display: flex;

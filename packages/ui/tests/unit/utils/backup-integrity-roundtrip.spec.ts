@@ -5,7 +5,9 @@ import '../../../../core/node_modules/fake-indexeddb/auto/index.mjs'
 import { DataManager } from '../../../../core/src/services/data/manager'
 import { FavoriteManager } from '../../../../core/src/services/favorite/manager'
 import { HistoryManager } from '../../../../core/src/services/history/manager'
+import { getDefaultTextModels } from '../../../../core/src/services/model/defaults'
 import { ModelManager } from '../../../../core/src/services/model/manager'
+import { getDefaultImageModels } from '../../../../core/src/services/image-model/defaults'
 import { ImageModelManager } from '../../../../core/src/services/image-model/manager'
 import { createImageAdapterRegistry } from '../../../../core/src/services/image/adapters/registry'
 import { ImageStorageService } from '../../../../core/src/services/image/storage'
@@ -68,10 +70,11 @@ describe('full backup integrity with real services', () => {
     const privateToken = 'private-oauth-token-must-stay-local'
     localStorage.setItem(tokenKey, JSON.stringify({ accessToken: privateToken, expiresAt: Date.now() + 3600_000 }))
     try {
-      const baseModel = (await source.models.exportData()).find(model => model.providerId === 'openai')!
+      const readEmptyEnv = () => ''
+      const baseModel = getDefaultTextModels(undefined, readEmptyEnv).openai
       await source.models.addModel('audit-text', { ...baseModel, id: 'audit-text', name: 'Audit text', enabled: true,
         connectionConfig: { ...baseModel.connectionConfig, apiKey: 'sample-only-text-key' } })
-      const baseImageModel = (await source.imageModels.exportData()).find(model => model.providerId === 'openai')!
+      const baseImageModel = getDefaultImageModels(undefined, readEmptyEnv)['image-openai-gpt']
       await source.imageModels.addConfig({ ...baseImageModel, id: 'audit-image', name: 'Audit image', enabled: true,
         connectionConfig: { ...baseImageModel.connectionConfig, apiKey: 'sample-only-image-key' } })
       await source.templates.saveTemplate({ id: 'audit-template', name: 'Audit template', content: 'Use {{globalSubject}}',

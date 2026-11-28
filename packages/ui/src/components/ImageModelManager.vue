@@ -15,7 +15,7 @@
         v-for="config in filteredConfigs"
         :key="config.id"
         :title="config.name || config.id"
-        :subtitle="`${providerDisplayName(config)} · ${config.model?.name || config.modelId}`"
+        :subtitle="[providerDisplayName(config) !== config.name ? providerDisplayName(config) : '', t('modelManager.defaultModelValue', { model: config.model?.name || config.modelId })].filter(Boolean).join(' · ')"
         :enabled="config.enabled"
         :testing="isTestingConnectionFor(config.id)"
         :test-disabled="isTestingConnectionFor(config.id)"
@@ -79,11 +79,11 @@
               </NSpace>
               <!-- 标签行：Provider、Model、能力标签合并 -->
               <NSpace :size="6" class="image-model-tags">
-                <NTag size="small" type="default" round :bordered="false">
+                <NTag v-if="providerDisplayName(config) !== config.name" size="small" type="default" round :bordered="false">
                   {{ providerDisplayName(config) }}
                 </NTag>
                 <NTag size="small" type="info" round :bordered="false">
-                  {{ config.model?.name || config.modelId }}
+                  {{ t('modelManager.defaultModelValue', { model: config.model?.name || config.modelId }) }}
                 </NTag>
                 <NTag
                   v-if="config.provider?.corsRestricted && !isElectronEnv"
@@ -110,6 +110,7 @@
           <NSpace @click.stop :size="4" class="image-model-actions">
             <NButton
               @click="testConnection(config.id)"
+              :aria-label="t('modelManager.testConnection')"
               size="small"
               quaternary
               :disabled="isTestingConnectionFor(config.id)"
@@ -135,17 +136,19 @@
 
             <NButton
               @click="editConfig(config.id)"
+              :aria-label="t('common.edit')"
               size="small"
               quaternary
             >
               <template #icon>
                 <UiSquarePen />
               </template>
-              <span class="hidden md:inline">{{ t('modelManager.editModel') }}</span>
+              <span class="hidden md:inline">{{ t('common.edit') }}</span>
             </NButton>
 
             <NButton
               @click="cloneConfig(config.id)"
+              :aria-label="t('modelManager.cloneModel')"
               size="small"
               quaternary
             >

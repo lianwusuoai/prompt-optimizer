@@ -3,7 +3,7 @@
   <ModelSelector v-bind="$attrs" :model-value="selectedValue" :groups="groups"
     :selected-config="selected?.primary" :selected-label="parameterConfig?.model.name || selectedModelId"
     :placeholder="placeholder" :disabled="disabled" :size="size" :aria-label="ariaLabel"
-    :show-config-action="showConfigAction"
+    :show-config-action="showConfigAction" :config-action-label="!options.length ? t('modelManager.addModel') : undefined"
     @update:model-value="choose" @focus="emit('focus')"
     @update:show="emit('update:show', $event)" @config="configure">
     <template v-if="parameters && parameterConfig" #selection-detail>
@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { computed, inject, ref, unref, type MaybeRef, type Ref } from 'vue'
 import { decodeImageModelSelection, encodeImageModelSelection, getImageModelSelectionConfigId, resolveRuntimeImageModel, type ImageModelConfig } from '@prompt-optimizer/core'
 import type { SelectOption } from '../types/select-options'
@@ -38,6 +39,8 @@ const props = withDefaults(defineProps<{
   parameters?: boolean
 }>(), { modelValue: '', showConfigAction: true })
 const emit = defineEmits<{ 'update:modelValue': [value: string]; 'update:show': [value: boolean]; focus: []; config: [] }>()
+const { t } = useI18n()
+const addConnection = inject<((tab: 'image') => Promise<void>) | null>('addModelConnection', null)
 const openModelManager = inject<((tab: 'image', configId?: string) => void | Promise<void>) | null>('openModelManager', null)
 const options = computed(() => unref(props.options))
 const services = inject<Ref<AppServices | null>>('services', ref(null))
@@ -89,6 +92,7 @@ const groups = computed(() => [
 })))
 async function configure(id?: string) {
   if (id && openModelManager) await openModelManager('image', id)
+  else if (!options.value.length && addConnection) await addConnection('image')
   else emit('config')
 }
 </script>

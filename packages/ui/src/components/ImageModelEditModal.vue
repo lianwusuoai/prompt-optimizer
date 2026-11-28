@@ -639,6 +639,10 @@ const resetFormData = () => {
 }
 
 const onProviderChange = async (providerId: string, autoSelectFirstModel?: boolean) => {
+  const previousProviderName = providers.value.find(provider => provider.id === configForm.value.providerId)?.name
+  if (!isEditing.value && (!configForm.value.name || configForm.value.name === previousProviderName)) {
+    configForm.value.name = providers.value.find(provider => provider.id === providerId)?.name || ''
+  }
   await handleProviderChange(providerId, autoSelectFirstModel)
 }
 
@@ -718,7 +722,7 @@ watch([() => props.show, () => props.configId, () => props.initialConfig], async
       resetFormData()
       const firstProvider = providers.value[0]
       if (firstProvider) {
-        await handleProviderChange(firstProvider.id)
+        await onProviderChange(firstProvider.id)
         await nextTick()
         if (!isCurrent()) return
         const firstModel = models.value[0]
