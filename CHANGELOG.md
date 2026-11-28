@@ -2,6 +2,11 @@
 
 Full release narratives now live in versioned files under `releases/`. This file stays as the index and summary entry point.
 
+## [2.17.1] - 2026-11-28
+
+- EN: Connect a ChatGPT subscription to use eligible text models in the desktop app. Turn a reference video into an editable prompt, manage text, image and video connections from one place, and recover the workspace when storage initialization is slow. [Release notes](releases/v2.17.1.en.md)
+- 中文：桌面版可连接 ChatGPT 订阅并使用套餐内的文本模型。视频工作区可从参考视频生成可编辑的提示词。文本、图像和视频连接统一管理，存储初始化较慢时也能恢复工作区。[版本说明](releases/v2.17.1.zh-CN.md)
+
 ## [2.17.0] - 2026-11-28
 
 - EN: Write video prompts and compare generated clips side by side. The MCP preview lets an AI assistant test prompts with models you configured in the desktop or web app. Multi-image optimization preserves your reference images, and the desktop app migrates existing data to SQLite on first launch after upgrading. [Release notes](releases/v2.17.0.en.md)
